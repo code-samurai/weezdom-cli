@@ -1,0 +1,289 @@
+"""Tests for query commands — search, entity, topics, sources."""
+
+import json
+import pytest
+import respx
+import httpx
+from click.testing import CliRunner
+
+from weezdom_cli.cli import main
+
+API_URL = "https://test.weezdom.ai"
+
+
+SEARCH_RESPONSE = {
+    "query": "progressive profiling",
+    "facts": [
+        {"fact": "Progressive profiling reduces form fatigue", "entities": ["Progressive Profiling"],
+         "source_url": "Marketing Guide", "confidence": 0.95},
+    ],
+    "entities_found": ["Progressive Profiling"],
+}
+
+ENTITY_RESPONSE = {
+    "name": "Progressive Profiling",
+    "entity_type": "Technique",
+    "summary": "A technique for gradually collecting user data",
+    "facts": ["Fact one", "Fact two"],
+    "relationships": {"SOLVES": ["Survey Fatigue"]},
+    "sources": [{"title": "Guide", "url": "https://example.com"}],
+}
+
+RELATED_RESPONSE = {
+    "entity": "Progressive Profiling",
+    "related": [
+        {"name": "Survey Fatigue", "entity_type": "Problem",
+         "relationship": "SOLVES", "direction": "outgoing"},
+    ],
+}
+
+TOPICS_RESPONSE = {
+    "total_entities": 644,
+    "by_type": {"Technique": 100, "Concept": 50},
+    "sample_entities": [
+        {"name": "Progressive Profiling", "type": "Technique", "mention_count": 15},
+    ],
+}
+
+SOURCES_RESPONSE = {
+    "query": "survey fatigue",
+    "sources": [
+        {"document_title": "Marketing Guide", "document_type": None,
+         "source_url": "https://example.com",
+         "segments": [{"content": "Quote from guide...", "context": None}]},
+    ],
+}
+
+
+class TestSearchCommand:
+    def test_search_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json=SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "search", "profiling"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["query"] == "progressive profiling"
+            assert len(data["facts"]) == 1
+
+    def test_search_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json=SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "search", "profiling"])
+            assert result.exit_code == 0
+            assert "Progressive profiling" in result.output
+
+    def test_search_no_results(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json={
+                "query": "nothing", "facts": [], "entities_found": [],
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "search", "nothing"])
+            assert result.exit_code == 0
+            assert "No results" in result.output
+
+    def test_search_sends_limit(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json=SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "search", "--limit", "5", "test"])
+            assert result.exit_code == 0
+            body = json.loads(rsps.calls[0].request.content)
+            assert body["num_results"] == 5
+
+    def test_search_truncates_long_facts(self, mock_config):
+        long_fact = "A" * 100
+        response = {
+            "query": "test",
+            "facts": [{"fact": long_fact, "entities": [], "confidence": 0.5}],
+            "entities_found": [],
+        }
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json=response))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "search", "test"])
+            assert result.exit_code == 0
+            assert long_fact not in result.output
+            # Our code adds "..." but Rich may also use "…" (unicode ellipsis)
+            assert "..." in result.output or "…" in result.output
+
+    def test_search_sends_correct_headers(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/search").mock(return_value=httpx.Response(200, json=SEARCH_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["--format", "json", "search", "profiling"])
+            req = rsps.calls[0].request
+            body = json.loads(req.content)
+            assert body["query"] == "profiling"
+            assert body["num_results"] == 10  # default
+            assert req.headers["x-api-key"] == "wdm_testkey12345678"
+            assert req.headers["x-graph-id"] == "graph-uuid-1"
+
+
+class TestEntityCommand:
+    def test_entity_json(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r"/tools/entity/.*").mock(
+                return_value=httpx.Response(200, json=ENTITY_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "entity", "Progressive Profiling"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["name"] == "Progressive Profiling"
+
+    def test_entity_table(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r"/tools/entity/[^/]+$").mock(
+                return_value=httpx.Response(200, json=ENTITY_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["entity", "Progressive Profiling"])
+            assert result.exit_code == 0
+            assert "Progressive Profiling" in result.output
+            assert "Technique" in result.output
+            assert "SOLVES" in result.output
+
+    def test_entity_related_json(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r"/tools/entity/.+/related").mock(
+                return_value=httpx.Response(200, json=RELATED_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "entity", "--related", "Progressive Profiling"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert len(data["related"]) == 1
+            assert data["related"][0]["relationship"] == "SOLVES"
+
+    def test_entity_related_table(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r"/tools/entity/.+/related").mock(
+                return_value=httpx.Response(200, json=RELATED_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "entity", "--related", "Progressive Profiling"])
+            assert result.exit_code == 0
+            assert "Survey Fatigue" in result.output
+            assert "SOLVES" in result.output
+            assert "outgoing" in result.output
+
+    def test_entity_url_encodes_name(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/entity/A%26B%20Corp").mock(
+                return_value=httpx.Response(200, json={
+                    "name": "A&B Corp", "entity_type": "Company",
+                    "summary": "", "facts": [], "relationships": {}, "sources": [],
+                }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "entity", "A&B Corp"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["name"] == "A&B Corp"
+
+    def test_entity_related_empty(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r"/tools/entity/.+/related").mock(
+                return_value=httpx.Response(200, json={"entity": "Orphan", "related": []}))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "entity", "--related", "Orphan"])
+            assert result.exit_code == 0
+            assert "No related entities" in result.output
+
+
+class TestTopicsCommand:
+    def test_topics_json(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/topics").mock(return_value=httpx.Response(200, json=TOPICS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "topics"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["total_entities"] == 644
+
+    def test_topics_table(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/topics").mock(return_value=httpx.Response(200, json=TOPICS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["topics"])
+            assert result.exit_code == 0
+            assert "644" in result.output
+            assert "Technique" in result.output
+
+    def test_topics_with_type_filter(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/topics").mock(return_value=httpx.Response(200, json=TOPICS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "topics", "--type", "Technique"])
+            assert result.exit_code == 0
+            req = rsps.calls[0].request
+            assert "entity_type=Technique" in str(req.url)
+
+    def test_topics_with_limit(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/topics").mock(return_value=httpx.Response(200, json=TOPICS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "topics", "--limit", "20"])
+            assert result.exit_code == 0
+            req = rsps.calls[0].request
+            assert "limit=20" in str(req.url)
+
+    def test_topics_empty(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/topics").mock(return_value=httpx.Response(200, json={
+                "total_entities": 0, "by_type": {}, "sample_entities": [],
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "topics"])
+            assert result.exit_code == 0
+            assert "0" in result.output
+            assert "No entities" in result.output
+
+
+class TestSourcesCommand:
+    def test_sources_json(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/sources").mock(return_value=httpx.Response(200, json=SOURCES_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "sources", "survey fatigue"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert len(data["sources"]) == 1
+
+    def test_sources_table(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/sources").mock(return_value=httpx.Response(200, json=SOURCES_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["sources", "survey fatigue"])
+            assert result.exit_code == 0
+            assert "Marketing Guide" in result.output
+            assert "Quote from guide" in result.output
+
+    def test_sources_no_results(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/sources").mock(return_value=httpx.Response(200, json={
+                "query": "nothing", "sources": [],
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "sources", "nothing"])
+            assert result.exit_code == 0
+            assert "No sources" in result.output
+
+    def test_sources_with_limit(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/sources").mock(return_value=httpx.Response(200, json=SOURCES_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "sources", "--limit", "3", "survey fatigue"])
+            assert result.exit_code == 0
+            body = json.loads(rsps.calls[0].request.content)
+            assert body["limit"] == 3
+
+    def test_sources_sends_correct_request(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/sources").mock(return_value=httpx.Response(200, json=SOURCES_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["--format", "json", "sources", "survey fatigue"])
+            req = rsps.calls[0].request
+            body = json.loads(req.content)
+            assert body["query"] == "survey fatigue"
+            assert body["limit"] == 5  # default
+            assert req.headers["x-api-key"] == "wdm_testkey12345678"
+            assert req.headers["x-graph-id"] == "graph-uuid-1"

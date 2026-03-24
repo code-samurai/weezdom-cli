@@ -1,0 +1,543 @@
+"""Main CLI entry point — click command groups."""
+
+import asyncio
+import sys
+from urllib.parse import quote
+
+import click
+
+from weezdom_cli.client import ClickExit, WeezdomClient
+from weezdom_cli.output import format_output
+
+
+def run_async(coro):
+    """Run an async coroutine from sync click context."""
+    try:
+        return asyncio.run(coro)
+    except ClickExit as e:
+        click.echo(f"Error: {e.message}", err=True)
+        sys.exit(1)
+
+
+def _get_format(ctx) -> str:
+    """Resolve output format from context or config default."""
+    fmt = ctx.obj.get("format") if ctx.obj else None
+    if not fmt:
+        from weezdom_cli import config
+        fmt = config.get("output_format", "table")
+    return fmt
+
+
+@click.group()
+@click.version_option()
+@click.option("--format", "output_format", type=click.Choice(["table", "json", "text"]), default=None,
+              help="Output format (default: table)")
+@click.pass_context
+def main(ctx, output_format):
+    """Weezdom CLI — terminal access to knowledge graphs."""
+    ctx.ensure_object(dict)
+    if output_format:
+        ctx.obj["format"] = output_format
+
+
+# -- auth commands --
+
+@main.group()
+def auth():
+    """Authenticate with Weezdom.ai."""
+    pass
+
+
+@auth.command()
+def login():
+    """Log in with a personal API key."""
+    from weezdom_cli import config
+
+    api_key = click.prompt("Enter your API key (wdm_...)", hide_input=True)
+    if not api_key.startswith("wdm_"):
+        click.echo("Error: API key must start with 'wdm_'", err=True)
+        sys.exit(1)
+
+    click.echo("Validating...")
+    client = WeezdomClient(api_key=api_key)
+    try:
+        user = run_async(client.validate_auth())
+        config.set_value("api_key", api_key)
+        click.echo(f"Logged in as {user.get('email', 'unknown')}")
+    except ClickExit as e:
+        click.echo(f"Error: {e.message}", err=True)
+        sys.exit(1)
+
+
+@auth.command()
+def logout():
+    """Clear stored credentials."""
+    from weezdom_cli import config
+    config.clear_key("api_key")
+    click.echo("Logged out.")
+
+
+@auth.command()
+def status():
+    """Show current authentication status."""
+    from weezdom_cli import config
+    cfg = config.load()
+    if cfg.get("api_key"):
+        prefix = cfg["api_key"][:8] + "..."
+        click.echo(f"Authenticated: {prefix}")
+        click.echo(f"API URL: {cfg.get('api_url', 'not set')}")
+        if cfg.get("active_graph_id"):
+            click.echo(f"Active graph: {cfg['active_graph_id']}")
+        else:
+            click.echo("No active graph. Run: weezdom graph use <id>")
+    else:
+        click.echo("Not authenticated. Run: weezdom auth login")
+
+
+# -- config commands --
+
+@main.group("config")
+def config_cmd():
+    """View and modify configuration."""
+    pass
+
+
+@config_cmd.command("show")
+def config_show():
+    """Display current configuration."""
+    from weezdom_cli import config
+    cfg = config.load()
+    for k, v in sorted(cfg.items()):
+        if k == "api_key" and v:
+            v = v[:8] + "..."
+        click.echo(f"{k}: {v}")
+
+
+@config_cmd.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key, value):
+    """Set a configuration value."""
+    from weezdom_cli import config
+    config.set_value(key, value)
+    click.echo(f"Set {key} = {value}")
+
+
+# -- query commands --
+
+@main.command()
+@click.argument("query")
+@click.option("--limit", default=10, help="Max results")
+@click.pass_context
+def search(ctx, query, limit):
+    """Search the knowledge graph for facts matching QUERY."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.post("/tools/search", json={"query": query, "num_results": limit}))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    facts = result.get("facts", [])
+    if not facts:
+        click.echo("No results found.")
+        return
+
+    # Truncate long facts for table display
+    for f in facts:
+        fact_text = f.get("fact", "")
+        if len(fact_text) > 60:
+            f["fact"] = fact_text[:57] + "..."
+
+    format_output(
+        facts,
+        fmt=fmt,
+        columns=[("fact", "Fact"), ("entities", "Entities"), ("confidence", "Confidence")],
+        title=f"Search: {query}",
+    )
+
+
+@main.command()
+@click.argument("name")
+@click.option("--related", is_flag=True, help="Show related entities")
+@click.pass_context
+def entity(ctx, name, related):
+    """Look up an entity by NAME in the knowledge graph."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    encoded_name = quote(name, safe="")
+
+    if related:
+        result = run_async(client.get(f"/tools/entity/{encoded_name}/related"))
+
+        if fmt == "json":
+            format_output(result, fmt="json")
+            return
+
+        related_list = result.get("related", [])
+        if not related_list:
+            click.echo(f"No related entities found for '{name}'.")
+            return
+
+        format_output(
+            related_list,
+            fmt=fmt,
+            columns=[
+                ("name", "Name"),
+                ("entity_type", "Type"),
+                ("relationship", "Relationship"),
+                ("direction", "Direction"),
+            ],
+            title=f"Related to: {name}",
+        )
+    else:
+        result = run_async(client.get(f"/tools/entity/{encoded_name}"))
+
+        if fmt == "json":
+            format_output(result, fmt="json")
+            return
+
+        if fmt == "text":
+            format_output(result, fmt="text")
+            return
+
+        # Rich table display for entity detail
+        click.echo(f"\n  Name: {result.get('name', 'N/A')}")
+        click.echo(f"  Type: {result.get('entity_type', 'N/A')}")
+        click.echo(f"  Summary: {result.get('summary', 'N/A')}")
+
+        facts = result.get("facts", [])
+        if facts:
+            click.echo(f"\n  Facts ({len(facts)}):")
+            for f in facts:
+                click.echo(f"    - {f}")
+
+        rels = result.get("relationships", {})
+        if rels:
+            click.echo("\n  Relationships:")
+            for rel_type, targets in rels.items():
+                for t in targets:
+                    click.echo(f"    {rel_type} -> {t}")
+
+        sources = result.get("sources", [])
+        if sources:
+            click.echo(f"\n  Sources ({len(sources)}):")
+            for s in sources:
+                title = s.get("title", "Untitled")
+                url = s.get("url", "")
+                click.echo(f"    - {title} ({url})" if url else f"    - {title}")
+
+        click.echo()
+
+
+@main.command()
+@click.option("--type", "entity_type", default=None, help="Filter by entity type")
+@click.option("--limit", default=50, help="Max entities")
+@click.pass_context
+def topics(ctx, entity_type, limit):
+    """List topics (entities) in the knowledge graph."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+
+    params = {"limit": limit}
+    if entity_type:
+        params["entity_type"] = entity_type
+
+    result = run_async(client.get("/tools/topics", params=params))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    total = result.get("total_entities", 0)
+    by_type = result.get("by_type", {})
+    entities = result.get("sample_entities", [])
+
+    click.echo(f"\nTotal entities: {total}")
+    if by_type:
+        click.echo("By type:")
+        for t, count in sorted(by_type.items(), key=lambda x: -x[1]):
+            click.echo(f"  {t}: {count}")
+    click.echo()
+
+    if entities:
+        format_output(
+            entities,
+            fmt=fmt,
+            columns=[("name", "Name"), ("type", "Type"), ("mention_count", "Mentions")],
+            title="Entities",
+        )
+    else:
+        click.echo("No entities found.")
+
+
+@main.command()
+@click.argument("query")
+@click.option("--limit", default=5, help="Max source documents")
+@click.pass_context
+def sources(ctx, query, limit):
+    """Find source documents matching QUERY."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.post("/tools/sources", json={"query": query, "limit": limit}))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    source_list = result.get("sources", [])
+    if not source_list:
+        click.echo("No sources found.")
+        return
+
+    for src in source_list:
+        title = src.get("document_title", "Untitled")
+        url = src.get("source_url", "")
+        click.echo(f"\n  {title}")
+        if url:
+            click.echo(f"  {url}")
+
+        segments = src.get("segments", [])
+        for seg in segments:
+            content = seg.get("content", "")
+            click.echo(f"    > {content}")
+
+    click.echo()
+
+
+# -- graph commands --
+
+@main.group()
+@click.pass_context
+def graph(ctx):
+    """Manage knowledge graphs."""
+    ctx.ensure_object(dict)
+
+
+@graph.command("list")
+@click.pass_context
+def graph_list(ctx):
+    """List all knowledge graphs."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get("/knowledge-graphs/data/list"))
+    graphs = result.get("graphs", [])
+
+    for g in graphs:
+        if g.get("id") and len(str(g["id"])) > 12:
+            g["id"] = str(g["id"])[:12] + "..."
+
+    format_output(graphs, fmt=fmt, columns=[
+        ("id", "ID"),
+        ("name", "Name"),
+        ("status", "Status"),
+        ("entity_count", "Entities"),
+        ("content_count", "Content"),
+    ], title="Knowledge Graphs")
+
+
+@graph.command("use")
+@click.argument("graph_id")
+@click.pass_context
+def graph_use(ctx, graph_id):
+    """Set the active graph for subsequent commands."""
+    from weezdom_cli import config
+
+    client = WeezdomClient()
+    result = run_async(client.get(f"/knowledge-graphs/data/{graph_id}"))
+    config.set_value("active_graph_id", graph_id)
+    name = result.get("name", graph_id)
+    click.echo(f"Active graph: {name} ({graph_id})")
+
+
+@graph.command("info")
+@click.argument("graph_id", required=False)
+@click.pass_context
+def graph_info(ctx, graph_id):
+    """Show details for a knowledge graph."""
+    from weezdom_cli import config
+
+    if not graph_id:
+        graph_id = config.get("active_graph_id")
+    if not graph_id:
+        click.echo("Error: No graph specified. Pass a graph_id or run: weezdom graph use <id>", err=True)
+        sys.exit(1)
+
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get(f"/knowledge-graphs/data/{graph_id}"))
+    format_output(result, fmt=fmt)
+
+
+@graph.command("pipeline")
+@click.argument("graph_id", required=False)
+@click.pass_context
+def graph_pipeline(ctx, graph_id):
+    """Show pipeline jobs for a knowledge graph."""
+    from weezdom_cli import config
+
+    if not graph_id:
+        graph_id = config.get("active_graph_id")
+    if not graph_id:
+        click.echo("Error: No graph specified. Pass a graph_id or run: weezdom graph use <id>", err=True)
+        sys.exit(1)
+
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get(f"/knowledge-graphs/data/{graph_id}/pipeline"))
+    jobs = result.get("jobs", [])
+
+    for j in jobs:
+        if j.get("id") and len(str(j["id"])) > 12:
+            j["id"] = str(j["id"])[:12] + "..."
+
+    format_output(jobs, fmt=fmt, columns=[
+        ("id", "ID"),
+        ("content_title", "Content"),
+        ("status", "Status"),
+        ("progress", "Progress"),
+    ], title="Pipeline Jobs")
+
+
+# -- content commands --
+
+@main.group()
+@click.pass_context
+def content(ctx):
+    """Manage content library."""
+    ctx.ensure_object(dict)
+
+
+@content.command("list")
+@click.option("--type", "content_type", default=None, help="Filter by content type")
+@click.option("--status", default=None, help="Filter by status")
+@click.option("--tag", default=None, help="Filter by tag")
+@click.option("--limit", default=20, help="Max items to return")
+@click.pass_context
+def content_list(ctx, content_type, status, tag, limit):
+    """List content items."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+
+    params = {"limit": limit}
+    if content_type:
+        params["type"] = content_type
+    if status:
+        params["status"] = status
+    if tag:
+        params["tag"] = tag
+
+    result = run_async(client.get("/content/library", params=params))
+    items = result.get("items", [])
+
+    for item in items:
+        if item.get("id") and len(str(item["id"])) > 12:
+            item["id"] = str(item["id"])[:12] + "..."
+
+    format_output(items, fmt=fmt, columns=[
+        ("id", "ID"),
+        ("title", "Title"),
+        ("type", "Type"),
+        ("status", "Status"),
+    ], title="Content Library")
+
+
+@content.command("add")
+@click.argument("urls", nargs=-1, required=True)
+@click.option("--tag", default=None, help="Tag to apply")
+@click.pass_context
+def content_add(ctx, urls, tag):
+    """Add content by URL."""
+    client = WeezdomClient()
+
+    body = {"urls": list(urls)}
+    if tag:
+        body["tag"] = tag
+
+    result = run_async(client.post("/content/url", json=body))
+    job_ids = result.get("job_ids", [])
+    click.echo(f"Queued {len(job_ids)} URL(s):")
+    for jid in job_ids:
+        click.echo(f"  Job: {jid}")
+
+
+@content.command("upload")
+@click.argument("file_path", type=click.Path(exists=True))
+@click.option("--tag", default=None, help="Tag to apply")
+@click.pass_context
+def content_upload(ctx, file_path, tag):
+    """Upload a file as content."""
+    import mimetypes
+    import os
+
+    client = WeezdomClient()
+    filename = os.path.basename(file_path)
+    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+
+    with open(file_path, "rb") as f:
+        files = {"file": (filename, f, mime_type)}
+        data = {}
+        if tag:
+            data["tag"] = tag
+        result = run_async(client.post("/content/upload", files=files, data=data if data else None))
+
+    click.echo(f"Uploaded: {filename}")
+    if result.get("job_ids"):
+        for jid in result["job_ids"]:
+            click.echo(f"  Job: {jid}")
+    elif result.get("id"):
+        click.echo(f"  Item ID: {result['id']}")
+
+
+@content.command("view")
+@click.argument("item_id")
+@click.pass_context
+def content_view(ctx, item_id):
+    """View content of an item."""
+    client = WeezdomClient()
+    result = run_async(client.get(f"/content/library/{item_id}/content"))
+    text = result.get("content", result.get("text", ""))
+    click.echo(text)
+
+
+@content.command("delete")
+@click.argument("item_id")
+@click.option("--force", is_flag=True, help="Skip confirmation")
+@click.pass_context
+def content_delete(ctx, item_id, force):
+    """Delete a content item."""
+    client = WeezdomClient()
+
+    if not force:
+        if not click.confirm(f"Delete content item {item_id}?"):
+            click.echo("Cancelled.")
+            return
+
+    run_async(client.delete(f"/content/library/{item_id}"))
+    click.echo(f"Deleted: {item_id}")
+
+
+@content.command("extract")
+@click.argument("ids", nargs=-1, required=True)
+@click.option("--graph", "graph_id", default=None, help="Target graph ID")
+@click.pass_context
+def content_extract(ctx, ids, graph_id):
+    """Extract content items into a knowledge graph."""
+    from weezdom_cli import config
+
+    if not graph_id:
+        graph_id = config.get("active_graph_id")
+    if not graph_id:
+        click.echo("Error: No graph specified. Use --graph or run: weezdom graph use <id>", err=True)
+        sys.exit(1)
+
+    client = WeezdomClient()
+    result = run_async(client.post("/content/bulk-extract", json={
+        "content_item_ids": list(ids),
+        "graph_id": graph_id,
+    }))
+    job_ids = result.get("job_ids", [])
+    click.echo(f"Queued {len(job_ids)} item(s) for extraction:")
+    for jid in job_ids:
+        click.echo(f"  Job: {jid}")
