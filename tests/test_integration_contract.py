@@ -375,3 +375,181 @@ class TestHeaderContract:
 
         req = respx_mock.calls[0].request
         assert "x-graph-id" not in req.headers
+
+
+# ---------------------------------------------------------------------------
+# Paths contract (GET /tools/paths)
+# ---------------------------------------------------------------------------
+
+class TestPathsContract:
+    """CLI paths must GET /tools/paths with source, target, max_depth params."""
+
+    PATHS_RESPONSE = {
+        "source": "A", "target": "B",
+        "paths": [{"entities": [{"name": "A"}, {"name": "B"}],
+                   "relationships": [{"type": "REL", "fact": None}]}],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_paths_sends_params(self, respx_mock):
+        respx_mock.get("/tools/paths").mock(
+            return_value=httpx.Response(200, json=self.PATHS_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/tools/paths", params={
+            "source": "A", "target": "B", "max_depth": 3})
+        assert result["source"] == "A"
+        req = respx_mock.calls[0].request
+        assert "source=A" in str(req.url)
+
+
+# ---------------------------------------------------------------------------
+# Neighborhood contract (GET /tools/entity/{name}/neighborhood)
+# ---------------------------------------------------------------------------
+
+class TestNeighborhoodContract:
+    """CLI neighborhood must GET /tools/entity/{name}/neighborhood."""
+
+    NEIGHBORHOOD_RESPONSE = {
+        "center": "Entity A", "depth": 2,
+        "nodes": [{"name": "Entity B", "entity_type": "Type", "summary": None, "distance": 1}],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_neighborhood_sends_params(self, respx_mock):
+        respx_mock.get("/tools/entity/Entity%20A/neighborhood").mock(
+            return_value=httpx.Response(200, json=self.NEIGHBORHOOD_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/tools/entity/Entity%20A/neighborhood",
+                                  params={"depth": 2, "limit": 50})
+        assert result["center"] == "Entity A"
+        assert len(result["nodes"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Batch contract (POST /batch-query)
+# ---------------------------------------------------------------------------
+
+class TestBatchContract:
+    """CLI batch must POST /batch-query with queries list."""
+
+    BATCH_RESPONSE = {
+        "results": [{"query": "test", "results": [], "context_tokens": 0,
+                     "format": "agent", "cursor": None}],
+        "total_queries": 1,
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_batch_sends_queries(self, respx_mock):
+        respx_mock.post("/batch-query").mock(
+            return_value=httpx.Response(200, json=self.BATCH_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.post("/batch-query", json={
+            "queries": [{"query": "test", "num_results": 10}]})
+        assert result["total_queries"] == 1
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["queries"][0]["query"] == "test"
+
+
+# ---------------------------------------------------------------------------
+# Workspace search contract (POST /search/workspace)
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceSearchContract:
+    """CLI workspace search must POST /search/workspace."""
+
+    WS_SEARCH_RESPONSE = {
+        "query": "test", "workspace_id": "ws-1",
+        "num_results": 0, "results": [],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_workspace_search_sends_body(self, respx_mock):
+        respx_mock.post("/search/workspace").mock(
+            return_value=httpx.Response(200, json=self.WS_SEARCH_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key")
+        result = await client.post("/search/workspace", json={
+            "query": "test", "workspace_id": "ws-1", "limit": 10})
+        assert result["query"] == "test"
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["workspace_id"] == "ws-1"
+
+
+# ---------------------------------------------------------------------------
+# Workspace info contract (GET /insights/workspaces)
+# ---------------------------------------------------------------------------
+
+class TestWorkspaceInfoContract:
+    """CLI workspace info must GET /insights/workspaces (no X-Graph-Id required)."""
+
+    WS_INFO_RESPONSE = {
+        "workspaces": [{"id": "ws-1", "name": "WS", "graph_count": 1, "entity_count": 100}],
+        "current_workspace_id": "ws-1",
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_workspace_info_no_graph_required(self, respx_mock):
+        respx_mock.get("/insights/workspaces").mock(
+            return_value=httpx.Response(200, json=self.WS_INFO_RESPONSE))
+        # Deliberately pass graph_id=None — workspace info doesn't need it
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id=None)
+        result = await client.get("/insights/workspaces")
+        assert len(result["workspaces"]) == 1
+        req = respx_mock.calls[0].request
+        assert "x-graph-id" not in req.headers
+
+
+# ---------------------------------------------------------------------------
+# Ontology list contract (GET /ontologies/list)
+# ---------------------------------------------------------------------------
+
+class TestOntologyListContract:
+    """CLI ontology list must GET /ontologies/list; response is raw array."""
+
+    ONTOLOGY_LIST_RESPONSE = [
+        {"id": "ont-1", "name": "Test Ontology", "version_count": 1,
+         "graph_count": 0, "published_graph_count": 0,
+         "status": {"overall_score": 75, "status": "draft"}},
+    ]
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_ontology_list_raw_array(self, respx_mock):
+        respx_mock.get("/ontologies/list").mock(
+            return_value=httpx.Response(200, json=self.ONTOLOGY_LIST_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/ontologies/list")
+        # Must be a list (raw array)
+        assert isinstance(result, list)
+        assert result[0]["name"] == "Test Ontology"
+
+
+# ---------------------------------------------------------------------------
+# Property search contract (POST /tools/properties/search)
+# ---------------------------------------------------------------------------
+
+class TestPropertySearchContract:
+    """CLI property-search must POST /tools/properties/search."""
+
+    PROP_SEARCH_RESPONSE = {
+        "property_name": "revenue", "property_value": None,
+        "matches": [{"name": "Segment A", "entity_type": "Segment",
+                     "properties": {"revenue": "high"}}],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_property_search_sends_body(self, respx_mock):
+        respx_mock.post("/tools/properties/search").mock(
+            return_value=httpx.Response(200, json=self.PROP_SEARCH_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.post("/tools/properties/search", json={
+            "property_name": "revenue", "limit": 50})
+        assert result["property_name"] == "revenue"
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["property_name"] == "revenue"
+        assert body["limit"] == 50

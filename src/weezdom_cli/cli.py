@@ -1,6 +1,7 @@
 """Main CLI entry point — click command groups."""
 
 import asyncio
+import json
 import sys
 from urllib.parse import quote
 
@@ -545,3 +546,295 @@ def content_extract(ctx, ids, graph_id):
     click.echo(f"Queued {len(job_ids)} item(s) for extraction:")
     for jid in job_ids:
         click.echo(f"  Job: {jid}")
+
+
+# -- traversal commands --
+
+@main.command()
+@click.argument("source")
+@click.argument("target")
+@click.option("--depth", default=3, help="Maximum path length (default 3)")
+@click.pass_context
+def paths(ctx, source, target, depth):
+    """Find shortest paths between SOURCE and TARGET entities."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get("/tools/paths", params={
+        "source": source, "target": target, "max_depth": depth,
+    }))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    path_list = result.get("paths", [])
+    if not path_list:
+        click.echo("No paths found.")
+        return
+
+    click.echo(f"\nPaths from '{result.get('source')}' to '{result.get('target')}':\n")
+    for i, p in enumerate(path_list, 1):
+        entities = p.get("entities", [])
+        rels = p.get("relationships", [])
+        parts = []
+        for j, ent in enumerate(entities):
+            parts.append(ent.get("name", "?"))
+            if j < len(rels):
+                parts.append(f" -[{rels[j].get('type', '?')}]-> ")
+        click.echo(f"  {i}. {''.join(parts)}")
+    click.echo()
+
+
+@main.command()
+@click.argument("queries", nargs=-1, required=True)
+@click.option("--limit", default=10, help="Max results per query (default 10)")
+@click.pass_context
+def batch(ctx, queries, limit):
+    """Run multiple QUERIES in parallel. Pass each query as a separate argument."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.post("/batch-query", json={
+        "queries": [{"query": q, "num_results": limit} for q in queries],
+    }))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    for item in result.get("results", []):
+        q = item.get("query", "")
+        hits = item.get("results", [])
+        click.echo(f"\n  Query: {q} ({len(hits)} result(s))")
+        for h in hits:
+            content = h.get("content", "")
+            if len(content) > 70:
+                content = content[:67] + "..."
+            score = h.get("score", 0)
+            click.echo(f"    [{score:.2f}] {content}")
+    click.echo()
+
+
+@main.command()
+@click.argument("name")
+@click.option("--depth", default=2, help="Number of hops (default 2)")
+@click.option("--limit", default=50, help="Max nodes to return (default 50)")
+@click.pass_context
+def neighborhood(ctx, name, depth, limit):
+    """Explore the neighborhood around entity NAME up to N hops away."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    encoded_name = quote(name, safe="")
+    result = run_async(client.get(
+        f"/tools/entity/{encoded_name}/neighborhood",
+        params={"depth": depth, "limit": limit},
+    ))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    nodes = result.get("nodes", [])
+    if not nodes:
+        click.echo(f"No neighbors found for '{name}'.")
+        return
+
+    for n in nodes:
+        summary = n.get("summary") or ""
+        if len(summary) > 50:
+            summary = summary[:47] + "..."
+        n["summary_short"] = summary
+
+    format_output(
+        nodes,
+        fmt=fmt,
+        columns=[
+            ("name", "Name"),
+            ("entity_type", "Type"),
+            ("distance", "Distance"),
+            ("summary_short", "Summary"),
+        ],
+        title=f"Neighborhood: {name} (depth={depth})",
+    )
+
+
+# -- workspace commands --
+
+@main.group()
+@click.pass_context
+def workspace(ctx):
+    """Explore workspaces and search across graphs."""
+    ctx.ensure_object(dict)
+
+
+@workspace.command("search")
+@click.argument("query")
+@click.option("--workspace-id", "-w", default=None, help="Workspace ID to search within")
+@click.option("--limit", default=10, help="Max results (default 10)")
+@click.pass_context
+def workspace_search(ctx, query, workspace_id, limit):
+    """Search across graphs in a workspace for QUERY."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    body = {"query": query, "limit": limit}
+    if workspace_id:
+        body["workspace_id"] = workspace_id
+    result = run_async(client.post("/search/workspace", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    items = result.get("results", [])
+    if not items:
+        click.echo("No results found.")
+        if not workspace_id:
+            click.echo("Tip: use -w WORKSPACE_ID to search a specific workspace.")
+            click.echo("Run 'weezdom workspace info' to list available workspaces.")
+        return
+
+    for item in items:
+        fact = item.get("fact", "")
+        if len(fact) > 60:
+            fact = fact[:57] + "..."
+        item["fact_short"] = fact
+
+    format_output(
+        items,
+        fmt=fmt,
+        columns=[
+            ("fact_short", "Fact"),
+            ("source_graph_name", "Graph"),
+            ("graph_role", "Role"),
+            ("score", "Score"),
+        ],
+        title=f"Workspace search: {query}",
+    )
+
+
+@workspace.command("info")
+@click.pass_context
+def workspace_info(ctx):
+    """List all workspaces for this tenant."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get("/insights/workspaces"))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    workspaces = result.get("workspaces", [])
+    if not workspaces:
+        click.echo("No workspaces found.")
+        return
+
+    for ws in workspaces:
+        if ws.get("id") and len(str(ws["id"])) > 12:
+            ws["id_short"] = str(ws["id"])[:12] + "..."
+        else:
+            ws["id_short"] = ws.get("id", "")
+
+    format_output(
+        workspaces,
+        fmt=fmt,
+        columns=[
+            ("id_short", "ID"),
+            ("name", "Name"),
+            ("graph_count", "Graphs"),
+            ("entity_count", "Entities"),
+        ],
+        title="Workspaces",
+    )
+
+
+# -- ontology commands --
+
+@main.group()
+@click.pass_context
+def ontology(ctx):
+    """Manage ontologies."""
+    ctx.ensure_object(dict)
+
+
+@ontology.command("list")
+@click.pass_context
+def ontology_list(ctx):
+    """List all ontologies for this tenant."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    # GET /ontologies/list returns a raw JSON array (SC-1: not dict-wrapped)
+    result = run_async(client.get("/ontologies/list"))
+    rows = result if isinstance(result, list) else []
+
+    if fmt == "json":
+        format_output(rows, fmt="json")
+        return
+
+    if not rows:
+        click.echo("No ontologies found.")
+        return
+
+    for row in rows:
+        if row.get("id") and len(str(row["id"])) > 12:
+            row["id_short"] = str(row["id"])[:12] + "..."
+        else:
+            row["id_short"] = row.get("id", "")
+        score = (row.get("status") or {}).get("overall_score")
+        row["score_str"] = str(score) if score is not None else "—"
+
+    format_output(
+        rows,
+        fmt=fmt,
+        columns=[
+            ("id_short", "ID"),
+            ("name", "Name"),
+            ("version_count", "Versions"),
+            ("graph_count", "Graphs"),
+            ("score_str", "Score"),
+        ],
+        title="Ontologies",
+    )
+
+
+@main.command("property-search")
+@click.argument("property")
+@click.option("--value", default=None, help="Filter by property value")
+@click.option("--type", "entity_type", default=None, help="Filter by entity type")
+@click.option("--limit", default=50, help="Max results (default 50)")
+@click.pass_context
+def property_search(ctx, property, value, entity_type, limit):
+    """Search entities by PROPERTY name, optionally filtering by value or type."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    body = {"property_name": property, "limit": limit}
+    if value:
+        body["property_value"] = value
+    if entity_type:
+        body["entity_type"] = entity_type
+    result = run_async(client.post("/tools/properties/search", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    matches = result.get("matches", [])
+    if not matches:
+        click.echo(f"No matches found for property '{property}'.")
+        return
+
+    for m in matches:
+        props = json.dumps(m.get("properties", {}), default=str)
+        if len(props) > 60:
+            props = props[:57] + "..."
+        m["props_str"] = props
+
+    format_output(
+        matches,
+        fmt=fmt,
+        columns=[
+            ("name", "Name"),
+            ("entity_type", "Type"),
+            ("props_str", "Properties"),
+        ],
+        title=f"Property search: {property}",
+    )

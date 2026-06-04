@@ -287,3 +287,233 @@ class TestSourcesCommand:
             assert body["limit"] == 5  # default
             assert req.headers["x-api-key"] == "wdm_testkey12345678"
             assert req.headers["x-graph-id"] == "graph-uuid-1"
+
+
+PATHS_RESPONSE = {
+    "source": "Progressive Profiling",
+    "target": "Lead Scoring",
+    "paths": [
+        {
+            "entities": [
+                {"name": "Progressive Profiling", "entity_type": "Technique"},
+                {"name": "Survey Fatigue", "entity_type": "Problem"},
+                {"name": "Lead Scoring", "entity_type": "Metric"},
+            ],
+            "relationships": [
+                {"type": "SOLVES", "fact": None},
+                {"type": "IMPROVES", "fact": None},
+            ],
+        }
+    ],
+}
+
+NEIGHBORHOOD_RESPONSE = {
+    "center": "Progressive Profiling",
+    "depth": 2,
+    "nodes": [
+        {"name": "Survey Fatigue", "entity_type": "Problem", "summary": "Fatigue from surveys", "distance": 1},
+        {"name": "Lead Scoring", "entity_type": "Metric", "summary": "Score leads", "distance": 2},
+    ],
+}
+
+
+class TestPathsCommand:
+    def test_paths_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "paths",
+                                          "Progressive Profiling", "Lead Scoring"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["source"] == "Progressive Profiling"
+            assert len(data["paths"]) == 1
+
+    def test_paths_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "paths",
+                                          "Progressive Profiling", "Lead Scoring"])
+            assert result.exit_code == 0
+            assert "Progressive Profiling" in result.output
+            assert "SOLVES" in result.output
+
+    def test_paths_no_paths_found(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json={
+                "source": "A", "target": "B", "paths": []
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "paths", "A", "B"])
+            assert result.exit_code == 0
+            assert "No paths found" in result.output
+
+    def test_paths_sends_correct_params(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.get("/tools/paths").mock(
+                return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["paths", "Entity A", "Entity B", "--depth", "4"])
+            assert route.called
+            url_str = str(route.calls[0].request.url)
+            assert "source=Entity" in url_str
+            assert "max_depth=4" in url_str
+
+
+class TestNeighborhoodCommand:
+    def test_neighborhood_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json=NEIGHBORHOOD_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "neighborhood",
+                                          "Progressive Profiling"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["center"] == "Progressive Profiling"
+            assert len(data["nodes"]) == 2
+
+    def test_neighborhood_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json=NEIGHBORHOOD_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "neighborhood",
+                                          "Progressive Profiling"])
+            assert result.exit_code == 0
+            assert "Survey Fatigue" in result.output
+            assert "Lead Scoring" in result.output
+
+    def test_neighborhood_no_nodes(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json={"center": "Unknown", "depth": 2, "nodes": []}))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "neighborhood", "Unknown"])
+            assert result.exit_code == 0
+            assert "No neighbors found" in result.output
+
+
+BATCH_RESPONSE = {
+    "results": [
+        {
+            "query": "profiling",
+            "results": [
+                {"content": "Progressive profiling reduces fatigue", "score": 0.95,
+                 "source": "Marketing Guide", "entity_name": None, "entity_type": None},
+            ],
+            "context_tokens": 150,
+            "format": "agent",
+            "cursor": None,
+        },
+        {
+            "query": "segmentation",
+            "results": [
+                {"content": "Segmentation improves targeting", "score": 0.88,
+                 "source": "Sales Guide", "entity_name": None, "entity_type": None},
+            ],
+            "context_tokens": 120,
+            "format": "agent",
+            "cursor": None,
+        },
+    ],
+    "total_queries": 2,
+}
+
+
+class TestBatchCommand:
+    def test_batch_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/batch-query").mock(return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "batch",
+                                          "profiling", "segmentation"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["total_queries"] == 2
+            assert len(data["results"]) == 2
+
+    def test_batch_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/batch-query").mock(return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "batch",  # SC-3
+                                          "profiling", "segmentation"])
+            assert result.exit_code == 0
+            assert "profiling" in result.output.lower()
+            assert "segmentation" in result.output.lower()
+
+    def test_batch_sends_correct_body(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.post("/batch-query").mock(
+                return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["batch", "q1", "q2", "--limit", "5"])
+            body = json.loads(route.calls[0].request.content)
+            assert len(body["queries"]) == 2
+            assert body["queries"][0]["query"] == "q1"
+            assert body["queries"][0]["num_results"] == 5
+
+    def test_batch_requires_at_least_one_query(self, mock_config):
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch"])
+        assert result.exit_code != 0
+
+
+PROPERTY_SEARCH_RESPONSE = {
+    "property_name": "revenue",
+    "property_value": None,
+    "matches": [
+        {
+            "name": "Enterprise Segment",
+            "entity_type": "Segment",
+            "properties": {"revenue": "high", "size": "large"},
+        },
+    ],
+}
+
+
+class TestPropertySearchCommand:
+    def test_property_search_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "property-search", "revenue"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["property_name"] == "revenue"
+            assert len(data["matches"]) == 1
+
+    def test_property_search_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "property-search", "revenue"])  # SC-3
+            assert result.exit_code == 0
+            assert "Enterprise Segment" in result.output
+
+    def test_property_search_with_value_and_type(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["property-search", "revenue",
+                                  "--value", "high", "--type", "Segment", "--limit", "20"])
+            body = json.loads(route.calls[0].request.content)
+            assert body["property_name"] == "revenue"
+            assert body["property_value"] == "high"
+            assert body["entity_type"] == "Segment"
+            assert body["limit"] == 20
+
+    def test_property_search_no_matches(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(return_value=httpx.Response(200, json={
+                "property_name": "revenue", "property_value": None, "matches": []
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "property-search", "revenue"])  # SC-3
+            assert result.exit_code == 0
+            assert "No matches" in result.output
