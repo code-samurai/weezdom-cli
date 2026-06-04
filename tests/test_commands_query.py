@@ -393,3 +393,69 @@ class TestNeighborhoodCommand:
             result = runner.invoke(main, ["--format", "table", "neighborhood", "Unknown"])
             assert result.exit_code == 0
             assert "No neighbors found" in result.output
+
+
+BATCH_RESPONSE = {
+    "results": [
+        {
+            "query": "profiling",
+            "results": [
+                {"content": "Progressive profiling reduces fatigue", "score": 0.95,
+                 "source": "Marketing Guide", "entity_name": None, "entity_type": None},
+            ],
+            "context_tokens": 150,
+            "format": "agent",
+            "cursor": None,
+        },
+        {
+            "query": "segmentation",
+            "results": [
+                {"content": "Segmentation improves targeting", "score": 0.88,
+                 "source": "Sales Guide", "entity_name": None, "entity_type": None},
+            ],
+            "context_tokens": 120,
+            "format": "agent",
+            "cursor": None,
+        },
+    ],
+    "total_queries": 2,
+}
+
+
+class TestBatchCommand:
+    def test_batch_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/batch-query").mock(return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "batch",
+                                          "profiling", "segmentation"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["total_queries"] == 2
+            assert len(data["results"]) == 2
+
+    def test_batch_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/batch-query").mock(return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "batch",  # SC-3
+                                          "profiling", "segmentation"])
+            assert result.exit_code == 0
+            assert "profiling" in result.output.lower()
+            assert "segmentation" in result.output.lower()
+
+    def test_batch_sends_correct_body(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.post("/batch-query").mock(
+                return_value=httpx.Response(200, json=BATCH_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["batch", "q1", "q2", "--limit", "5"])
+            body = json.loads(route.calls[0].request.content)
+            assert len(body["queries"]) == 2
+            assert body["queries"][0]["query"] == "q1"
+            assert body["queries"][0]["num_results"] == 5
+
+    def test_batch_requires_at_least_one_query(self, mock_config):
+        runner = CliRunner()
+        result = runner.invoke(main, ["batch"])
+        assert result.exit_code != 0

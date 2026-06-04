@@ -586,6 +586,35 @@ def paths(ctx, source, target, depth):
 
 
 @main.command()
+@click.argument("queries", nargs=-1, required=True)
+@click.option("--limit", default=10, help="Max results per query (default 10)")
+@click.pass_context
+def batch(ctx, queries, limit):
+    """Run multiple QUERIES in parallel. Pass each query as a separate argument."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.post("/batch-query", json={
+        "queries": [{"query": q, "num_results": limit} for q in queries],
+    }))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    for item in result.get("results", []):
+        q = item.get("query", "")
+        hits = item.get("results", [])
+        click.echo(f"\n  Query: {q} ({len(hits)} result(s))")
+        for h in hits:
+            content = h.get("content", "")
+            if len(content) > 70:
+                content = content[:67] + "..."
+            score = h.get("score", 0)
+            click.echo(f"    [{score:.2f}] {content}")
+    click.echo()
+
+
+@main.command()
 @click.argument("name")
 @click.option("--depth", default=2, help="Number of hops (default 2)")
 @click.option("--limit", default=50, help="Max nodes to return (default 50)")
