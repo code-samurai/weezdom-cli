@@ -794,3 +794,47 @@ def ontology_list(ctx):
         ],
         title="Ontologies",
     )
+
+
+@main.command("property-search")
+@click.argument("property")
+@click.option("--value", default=None, help="Filter by property value")
+@click.option("--type", "entity_type", default=None, help="Filter by entity type")
+@click.option("--limit", default=50, help="Max results (default 50)")
+@click.pass_context
+def property_search(ctx, property, value, entity_type, limit):
+    """Search entities by PROPERTY name, optionally filtering by value or type."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    body = {"property_name": property, "limit": limit}
+    if value:
+        body["property_value"] = value
+    if entity_type:
+        body["entity_type"] = entity_type
+    result = run_async(client.post("/tools/properties/search", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    matches = result.get("matches", [])
+    if not matches:
+        click.echo(f"No matches found for property '{property}'.")
+        return
+
+    for m in matches:
+        props = json.dumps(m.get("properties", {}), default=str)
+        if len(props) > 60:
+            props = props[:57] + "..."
+        m["props_str"] = props
+
+    format_output(
+        matches,
+        fmt=fmt,
+        columns=[
+            ("name", "Name"),
+            ("entity_type", "Type"),
+            ("props_str", "Properties"),
+        ],
+        title=f"Property search: {property}",
+    )

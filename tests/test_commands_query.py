@@ -459,3 +459,61 @@ class TestBatchCommand:
         runner = CliRunner()
         result = runner.invoke(main, ["batch"])
         assert result.exit_code != 0
+
+
+PROPERTY_SEARCH_RESPONSE = {
+    "property_name": "revenue",
+    "property_value": None,
+    "matches": [
+        {
+            "name": "Enterprise Segment",
+            "entity_type": "Segment",
+            "properties": {"revenue": "high", "size": "large"},
+        },
+    ],
+}
+
+
+class TestPropertySearchCommand:
+    def test_property_search_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "property-search", "revenue"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["property_name"] == "revenue"
+            assert len(data["matches"]) == 1
+
+    def test_property_search_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "property-search", "revenue"])  # SC-3
+            assert result.exit_code == 0
+            assert "Enterprise Segment" in result.output
+
+    def test_property_search_with_value_and_type(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.post("/tools/properties/search").mock(
+                return_value=httpx.Response(200, json=PROPERTY_SEARCH_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["property-search", "revenue",
+                                  "--value", "high", "--type", "Segment", "--limit", "20"])
+            body = json.loads(route.calls[0].request.content)
+            assert body["property_name"] == "revenue"
+            assert body["property_value"] == "high"
+            assert body["entity_type"] == "Segment"
+            assert body["limit"] == 20
+
+    def test_property_search_no_matches(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/tools/properties/search").mock(return_value=httpx.Response(200, json={
+                "property_name": "revenue", "property_value": None, "matches": []
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "property-search", "revenue"])  # SC-3
+            assert result.exit_code == 0
+            assert "No matches" in result.output
