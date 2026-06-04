@@ -43,6 +43,28 @@ weezdom search <query> [--limit N]              # Search for facts across the gr
 weezdom entity <name> [--related]               # Entity details or related entities
 weezdom topics [--type TYPE] [--limit N]        # List entity types and top entities
 weezdom sources <query> [--limit N]             # Find source documents for a query
+weezdom batch <query>... [--limit N]            # Run multiple queries in parallel
+weezdom property-search <prop> [--value V] [--type T] [--limit N]  # Filter entities by property
+```
+
+### Graph Traversal
+
+```bash
+weezdom paths <source> <target> [--depth N]            # Shortest paths between two entities
+weezdom neighborhood <name> [--depth N] [--limit N]    # N-hop subgraph around an entity
+```
+
+### Workspaces
+
+```bash
+weezdom workspace info                              # List all workspaces with graph/entity counts
+weezdom workspace search <query> [-w WORKSPACE_ID] [--limit N]  # Search across all graphs in a workspace
+```
+
+### Ontologies
+
+```bash
+weezdom ontology list    # List tenant ontologies with version count and quality score
 ```
 
 ### Content Management
