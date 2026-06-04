@@ -977,6 +977,121 @@ def ontology_build_status(ctx, job_id):
         click.echo(f"Error: {result['error']}", err=True)
 
 
+@ontology.command("score")
+@click.argument("ontology_id")
+@click.pass_context
+def ontology_score(ctx, ontology_id):
+    """Show quality score and improvement gaps for an ontology.
+
+    Example: weezdom ontology score <ontology_id>
+    """
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get(f"/ontologies/{ontology_id}/score"))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    quality = result.get("quality", {})
+    score = quality.get("overall_score", "?")
+    grade = quality.get("grade", "?")
+    # Use server-provided is_buildable — avoids hardcoded threshold in CLI
+    buildable = quality.get("is_buildable", False)
+    buildable_label = "  ✓ buildable" if buildable else "  below threshold"
+    click.echo(f"Score: {score}/100 (grade: {grade}{buildable_label})")
+
+    gaps = result.get("gaps", [])
+    if gaps:
+        click.echo(f"\nGaps ({len(gaps)}):")
+        for g in gaps:
+            pts = g.get("impact_points", 0)
+            crit = g.get("criterion", "")
+            tip = g.get("specific_tip", "")
+            click.echo(f"  [{pts:+d}pts] {crit}: {tip}")
+    else:
+        click.echo("No gaps — ontology meets quality threshold.")
+
+
+@ontology.command("improve")
+@click.argument("ontology_id")
+@click.option(
+    "--updates-file",
+    "updates_file",
+    default=None,
+    help="JSON file with partial config updates (use - for stdin)",
+)
+@click.pass_context
+def ontology_improve(ctx, ontology_id, updates_file):
+    """Apply config updates to an ontology, creating a new version.
+
+    The updates dict is a partial ontology config. entity_types and
+    relationship_types are merged by name; all other keys overwrite.
+
+    Example: weezdom ontology improve <id> --updates-file updates.json
+    Example: cat updates.json | weezdom ontology improve <id> --updates-file -
+    """
+    fmt = _get_format(ctx)
+
+    if updates_file is None or updates_file == "-":
+        if sys.stdin.isatty():
+            click.echo(
+                "Error: provide --updates-file FILE or pipe JSON via stdin.", err=True
+            )
+            sys.exit(1)
+        raw = sys.stdin.read()
+    else:
+        try:
+            with open(updates_file) as f:
+                raw = f.read()
+        except OSError as e:
+            click.echo(f"Error reading updates file: {e}", err=True)
+            sys.exit(1)
+
+    try:
+        updates = json.loads(raw)
+    except json.JSONDecodeError as e:
+        click.echo(f"Error: updates file is not valid JSON: {e}", err=True)
+        sys.exit(1)
+
+    client = WeezdomClient()
+    result = run_async(
+        client.post(f"/ontologies/{ontology_id}/improve", json={"updates": updates})
+    )
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    quality = result.get("quality") or {}
+    score = quality.get("overall_score", "?")
+    click.echo(
+        f"Improved: version {result.get('new_version')} | score: {score}/100"
+    )
+    click.echo(f"New version ID: {result.get('new_version_id')}")
+
+
+@ontology.command("delete")
+@click.argument("ontology_id")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_context
+def ontology_delete(ctx, ontology_id, force):
+    """Delete an ontology (must not be referenced by any graphs).
+
+    Use --force to skip the confirmation prompt.
+    Example: weezdom ontology delete <ontology_id> --force
+    """
+    client = WeezdomClient()
+
+    if not force:
+        if not click.confirm(f"Delete ontology {ontology_id}?"):
+            click.echo("Cancelled.")
+            return
+
+    run_async(client.delete(f"/ontologies/{ontology_id}"))
+    click.echo(f"Deleted: {ontology_id}")
+
+
 @main.command("property-search")
 @click.argument("property")
 @click.option("--value", default=None, help="Filter by property value")

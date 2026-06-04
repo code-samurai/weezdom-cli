@@ -699,3 +699,74 @@ class TestOntologyBuildContract:
         with pytest.raises(ClickExit, match="API error"):
             await client.post("/ontologies/build",
                               json={"name": "x", "description": "y", "goals": []})
+
+
+class TestOntologyScoreContract:
+    """CLI score must GET /ontologies/{id}/score with X-API-Key header."""
+
+    SCORE_RESPONSE = {
+        "ontology_id": "ont-1",
+        "version_id": "ver-1",
+        "version": 1,
+        "quality": {"overall_score": 78, "grade": "B", "is_buildable": True},
+        "gaps": [],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_score_sends_get_to_correct_path(self, respx_mock):
+        respx_mock.get("/ontologies/ont-1/score").mock(
+            return_value=httpx.Response(200, json=self.SCORE_RESPONSE)
+        )
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/ontologies/ont-1/score")
+        assert result["quality"]["overall_score"] == 78
+        req = respx_mock.calls[0].request
+        assert req.headers["x-api-key"] == "wdm_key"
+        assert req.method == "GET"
+
+
+class TestOntologyImproveContract:
+    """CLI improve must POST /ontologies/{id}/improve with body {"updates": {...}}."""
+
+    IMPROVE_RESPONSE = {
+        "ontology_id": "ont-1",
+        "new_version_id": "ver-2",
+        "new_version": 2,
+        "quality": {"overall_score": 72, "grade": "B"},
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_improve_sends_post_with_updates_key(self, respx_mock):
+        respx_mock.post("/ontologies/ont-1/improve").mock(
+            return_value=httpx.Response(200, json=self.IMPROVE_RESPONSE)
+        )
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        updates = {"entity_types": [{"name": "Deal", "description": "Updated"}]}
+        result = await client.post(
+            "/ontologies/ont-1/improve", json={"updates": updates}
+        )
+        assert result["new_version_id"] == "ver-2"
+        req = respx_mock.calls[0].request
+        import json as _json
+        body = _json.loads(req.content)
+        assert "updates" in body
+        assert req.method == "POST"
+
+
+class TestOntologyDeleteContract:
+    """CLI delete must call DELETE /ontologies/{id} with X-API-Key header."""
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_delete_sends_delete_to_correct_path(self, respx_mock):
+        respx_mock.delete("/ontologies/ont-del-1").mock(
+            return_value=httpx.Response(200, json={"success": True})
+        )
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.delete("/ontologies/ont-del-1")
+        assert result["success"] is True
+        req = respx_mock.calls[0].request
+        assert req.method == "DELETE"
+        assert req.headers["x-api-key"] == "wdm_key"

@@ -201,3 +201,198 @@ class TestOntologyBuildStatusCommand:
             result = runner.invoke(main, ["ontology", "build-status", "job-uuid-build"])
         assert result.exit_code == 0, result.output
         assert "queued" in result.output
+
+
+# ── v0.4 fixtures ───────────────────────────────────────────────────────────
+
+SCORE_RESPONSE = {
+    "ontology_id": "ont-1",
+    "version_id": "ver-1",
+    "version": 1,
+    "quality": {
+        "overall_score": 82,
+        "grade": "B",
+        "threshold": 70,
+        "is_buildable": True,
+        "axes": {},
+        "weakest_entities": [],
+        "weakest_relationships": [],
+        "next_actions": [],
+    },
+    "gaps": [],
+}
+
+
+class TestOntologyScoreCommand:
+    def test_score_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=SCORE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["quality"]["overall_score"] == 82
+
+    def test_score_table_output_shows_score_and_grade(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=SCORE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0, result.output
+        assert "82" in result.output
+        assert "B" in result.output
+
+    def test_score_no_gaps_shows_no_gaps_message(self, mock_config):
+        no_gap_response = {**SCORE_RESPONSE, "gaps": []}
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=no_gap_response)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0
+        assert "No gaps" in result.output
+
+    def test_score_404_exits_1(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/missing/score").mock(
+                return_value=httpx.Response(404, json={"detail": "not found"})
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["ontology", "score", "missing"])
+        assert result.exit_code == 1
+
+
+IMPROVE_RESPONSE = {
+    "ontology_id": "ont-1",
+    "new_version_id": "ver-2",
+    "new_version": 2,
+    "quality": {"overall_score": 72, "grade": "B", "is_buildable": True},
+}
+
+UPDATES_DICT = {
+    "entity_types": [
+        {
+            "name": "Revenue",
+            "description": "Updated",
+            "examples": [{"text": "Q2 deal", "why": "Revenue realized"}],
+        }
+    ]
+}
+
+
+class TestOntologyImproveCommand:
+    def test_improve_with_updates_file_shows_new_version(self, mock_config, tmp_path):
+        updates_file = tmp_path / "updates.json"
+        updates_file.write_text(json.dumps(UPDATES_DICT))
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["--format", "table", "ontology", "improve", "ont-1",
+                 "--updates-file", str(updates_file)],
+            )
+        assert result.exit_code == 0, result.output
+        assert "version 2" in result.output
+        assert "72" in result.output
+
+    def test_improve_json_output(self, mock_config, tmp_path):
+        updates_file = tmp_path / "updates.json"
+        updates_file.write_text(json.dumps(UPDATES_DICT))
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["--format", "json", "ontology", "improve", "ont-1",
+                 "--updates-file", str(updates_file)],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["new_version_id"] == "ver-2"
+
+    def test_improve_invalid_json_exits_1(self, mock_config, tmp_path):
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text("not json {")
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["ontology", "improve", "ont-1", "--updates-file", str(bad_file)]
+        )
+        assert result.exit_code == 1
+        assert "not valid JSON" in result.output
+
+    def test_improve_stdin_reads_updates(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["ontology", "improve", "ont-1", "--updates-file", "-"],
+                input=json.dumps(UPDATES_DICT),
+            )
+        assert result.exit_code == 0, result.output
+
+    def test_improve_no_file_no_stdin_exits_1(self, mock_config):
+        # CliRunner provides empty stdin (isatty=False) — json.loads("") raises JSONDecodeError
+        runner = CliRunner()
+        result = runner.invoke(main, ["ontology", "improve", "ont-1"])
+        assert result.exit_code == 1
+
+
+class TestOntologyDeleteCommand:
+    def test_delete_with_force_skips_confirmation(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-del-1").mock(
+                return_value=httpx.Response(200, json={"success": True})
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-del-1", "--force"]
+            )
+        assert result.exit_code == 0, result.output
+        assert "Deleted" in result.output
+
+    def test_delete_without_force_prompts_and_proceeds(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-del-2").mock(
+                return_value=httpx.Response(200, json={"success": True})
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-del-2"], input="y\n"
+            )
+        assert result.exit_code == 0, result.output
+        assert "Deleted" in result.output
+
+    def test_delete_cancel_aborts(self, mock_config):
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["ontology", "delete", "ont-3"], input="n\n"
+        )
+        assert result.exit_code == 0
+        assert "Cancelled." in result.output
+
+    def test_delete_409_exits_1(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-in-use").mock(
+                return_value=httpx.Response(
+                    409, json={"detail": "Cannot delete: ontology is in use"}
+                )
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-in-use", "--force"]
+            )
+        assert result.exit_code == 1
+        assert "Cannot delete" in result.output
