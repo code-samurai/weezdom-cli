@@ -69,6 +69,9 @@ weezdom ontology suggest "<description>" [--goal TEXT]...           # Generate a
 weezdom ontology create <name> [--spec FILE|-]                      # Create ontology from structured spec (file or stdin)
 weezdom ontology build <name> "<description>" [--goal TEXT]... [--iterations N]  # Autonomous AI build (~1–4 min, polls until done)
 weezdom ontology build-status <job_id>                              # Check status of a build job (use after timeout/interruption)
+weezdom ontology score <id>                                         # Show quality score and gaps
+weezdom ontology improve <id> --updates-file F                      # Apply updates from JSON file (- for stdin)
+weezdom ontology delete <id> [--force]                              # Delete ontology (must not be referenced by graphs)
 ```
 
 Pipe `suggest` into `create` for a two-step workflow:
