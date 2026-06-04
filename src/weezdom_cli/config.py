@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
+import click
 import yaml
 
 
@@ -27,16 +28,23 @@ def load() -> dict:
     config = dict(DEFAULTS)
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE) as f:
-            on_disk = yaml.safe_load(f) or {}
+            try:
+                on_disk = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                raise click.ClickException(
+                    f"Config file is malformed: {e}. "
+                    f"Delete {CONFIG_FILE} and run `weezdom auth login`."
+                )
         config.update(on_disk)
     return config
 
 
 def save(config: dict):
-    """Save config to disk."""
+    """Save config to disk with user-only permissions."""
     _ensure_dir()
     with open(CONFIG_FILE, "w") as f:
         yaml.safe_dump(config, f, default_flow_style=False)
+    os.chmod(CONFIG_FILE, 0o600)
 
 
 def get(key: str, default=None):
