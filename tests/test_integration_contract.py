@@ -646,44 +646,54 @@ class TestOntologyCreateContract:
 # ---------------------------------------------------------------------------
 
 class TestOntologyBuildContract:
-    """CLI build must POST /ontologies/build with name, description, goals, max_iterations."""
+    """POST /ontologies/build now returns 202 + {job_id, status: 'queued'}."""
 
-    BUILD_RESPONSE = {
-        "ontology_id": "ont-2", "version_id": "ver-2",
-        "quality": {"overall_score": 75, "grade": "B", "is_buildable": True,
-                    "axes": {}, "weakest_entities": [], "weakest_relationships": [],
-                    "next_actions": []},
-        "gaps": [],
-        "iterations_used": 1,
-        "reached_threshold": True,
-    }
+    ENQUEUE_RESPONSE = {"job_id": "job-uuid-42", "status": "queued"}
 
     @respx.mock(base_url=API_URL)
     @pytest.mark.asyncio
-    async def test_build_posts_body(self, respx_mock):
+    async def test_build_returns_job_id(self, respx_mock):
         respx_mock.post("/ontologies/build").mock(
-            return_value=httpx.Response(200, json=self.BUILD_RESPONSE))
+            return_value=httpx.Response(202, json=self.ENQUEUE_RESPONSE))
         client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
         result = await client.post("/ontologies/build", json={
             "name": "Sales AI", "description": "Track sales",
             "goals": ["find patterns"], "max_iterations": 3,
         })
-        assert result["reached_threshold"] is True
+        assert result["job_id"] == "job-uuid-42"
+        assert result["status"] == "queued"
         body = json.loads(respx_mock.calls[0].request.content)
         assert body["name"] == "Sales AI"
         assert body["max_iterations"] == 3
 
+    @respx.mock(base_url=API_URL)
     @pytest.mark.asyncio
-    async def test_build_timeout_uses_custom_value(self):
-        """WeezdomClient(timeout=300) must store timeout=300 (T4 adds the param)."""
-        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1", timeout=300)
-        assert client.timeout == 300
+    async def test_build_status_contract(self, respx_mock):
+        """GET /ontologies/build-status/{job_id} returns status shape."""
+        status_response = {
+            "job_id": "job-uuid-42",
+            "status": "completed",
+            "result": {
+                "ontology_id": "ont-2", "version_id": "ver-2",
+                "quality": {"overall_score": 75},
+                "gaps": [], "iterations_used": 2, "reached_threshold": True,
+            },
+            "error": None,
+        }
+        respx_mock.get("/ontologies/build-status/job-uuid-42").mock(
+            return_value=httpx.Response(200, json=status_response))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/ontologies/build-status/job-uuid-42")
+        assert result["job_id"] == "job-uuid-42"
+        assert result["status"] == "completed"
+        assert result["result"]["ontology_id"] == "ont-2"
+        assert result["error"] is None
 
     @respx.mock(base_url=API_URL)
     @pytest.mark.asyncio
     async def test_build_502_raises_click_exit(self, respx_mock):
         respx_mock.post("/ontologies/build").mock(
-            return_value=httpx.Response(502, json={"detail": "LLM generation failed"}))
+            return_value=httpx.Response(502, json={"detail": "job_store unavailable"}))
         client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
         from weezdom_cli.client import ClickExit
         with pytest.raises(ClickExit, match="API error"):
