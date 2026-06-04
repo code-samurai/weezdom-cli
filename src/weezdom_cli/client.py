@@ -5,14 +5,17 @@ import httpx
 from weezdom_cli import config
 
 
+_UNSET = object()
+
+
 class WeezdomClient:
     """Thin httpx wrapper that attaches auth and graph headers."""
 
-    def __init__(self, api_url: str = None, api_key: str = None, graph_id: str = None):
+    def __init__(self, api_url: str = None, api_key: str = None, graph_id: str = _UNSET):
         cfg = config.load()
         self.api_url = (api_url or cfg.get("api_url", "")).rstrip("/")
         self.api_key = api_key or cfg.get("api_key")
-        self.graph_id = graph_id or cfg.get("active_graph_id")
+        self.graph_id = cfg.get("active_graph_id") if graph_id is _UNSET else graph_id
 
     def _headers(self) -> dict:
         h = {}
@@ -28,7 +31,11 @@ class WeezdomClient:
         if resp.status_code == 403:
             raise click_exit("Access denied. Check your permissions.")
         if resp.status_code == 404:
-            raise click_exit(f"Not found: {resp.url.path}")
+            if resp.headers.get("content-type", "").startswith("application/json"):
+                detail = resp.json().get("detail", f"Not found: {resp.url.path}")
+            else:
+                detail = f"Not found: {resp.url.path}"
+            raise click_exit(detail)
         if resp.status_code >= 400:
             if resp.headers.get("content-type", "").startswith("application/json"):
                 detail = resp.json().get("detail", resp.text[:200])
