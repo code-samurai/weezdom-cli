@@ -133,7 +133,7 @@ class TestEntityContract:
         )
         client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
         from weezdom_cli.client import ClickExit
-        with pytest.raises(ClickExit, match="Not found"):
+        with pytest.raises(ClickExit, match="Entity not found: Nonexistent"):
             await client.get("/tools/entity/Nonexistent")
 
 
