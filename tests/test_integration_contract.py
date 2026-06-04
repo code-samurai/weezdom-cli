@@ -699,3 +699,28 @@ class TestOntologyBuildContract:
         with pytest.raises(ClickExit, match="API error"):
             await client.post("/ontologies/build",
                               json={"name": "x", "description": "y", "goals": []})
+
+
+class TestOntologyScoreContract:
+    """CLI score must GET /ontologies/{id}/score with X-API-Key header."""
+
+    SCORE_RESPONSE = {
+        "ontology_id": "ont-1",
+        "version_id": "ver-1",
+        "version": 1,
+        "quality": {"overall_score": 78, "grade": "B", "is_buildable": True},
+        "gaps": [],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_score_sends_get_to_correct_path(self, respx_mock):
+        respx_mock.get("/ontologies/ont-1/score").mock(
+            return_value=httpx.Response(200, json=self.SCORE_RESPONSE)
+        )
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.get("/ontologies/ont-1/score")
+        assert result["quality"]["overall_score"] == 78
+        req = respx_mock.calls[0].request
+        assert req.headers["x-api-key"] == "wdm_key"
+        assert req.method == "GET"

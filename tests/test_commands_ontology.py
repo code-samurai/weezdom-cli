@@ -201,3 +201,67 @@ class TestOntologyBuildStatusCommand:
             result = runner.invoke(main, ["ontology", "build-status", "job-uuid-build"])
         assert result.exit_code == 0, result.output
         assert "queued" in result.output
+
+
+# ── v0.4 fixtures ───────────────────────────────────────────────────────────
+
+SCORE_RESPONSE = {
+    "ontology_id": "ont-1",
+    "version_id": "ver-1",
+    "version": 1,
+    "quality": {
+        "overall_score": 82,
+        "grade": "B",
+        "threshold": 70,
+        "is_buildable": True,
+        "axes": {},
+        "weakest_entities": [],
+        "weakest_relationships": [],
+        "next_actions": [],
+    },
+    "gaps": [],
+}
+
+
+class TestOntologyScoreCommand:
+    def test_score_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=SCORE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["quality"]["overall_score"] == 82
+
+    def test_score_table_output_shows_score_and_grade(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=SCORE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0, result.output
+        assert "82" in result.output
+        assert "B" in result.output
+
+    def test_score_no_gaps_shows_no_gaps_message(self, mock_config):
+        no_gap_response = {**SCORE_RESPONSE, "gaps": []}
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/ont-1/score").mock(
+                return_value=httpx.Response(200, json=no_gap_response)
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "ontology", "score", "ont-1"])
+        assert result.exit_code == 0
+        assert "No gaps" in result.output
+
+    def test_score_404_exits_1(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/ontologies/missing/score").mock(
+                return_value=httpx.Response(404, json={"detail": "not found"})
+            )
+            runner = CliRunner()
+            result = runner.invoke(main, ["ontology", "score", "missing"])
+        assert result.exit_code == 1

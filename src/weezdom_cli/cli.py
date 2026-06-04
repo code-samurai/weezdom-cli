@@ -977,6 +977,42 @@ def ontology_build_status(ctx, job_id):
         click.echo(f"Error: {result['error']}", err=True)
 
 
+@ontology.command("score")
+@click.argument("ontology_id")
+@click.pass_context
+def ontology_score(ctx, ontology_id):
+    """Show quality score and improvement gaps for an ontology.
+
+    Example: weezdom ontology score <ontology_id>
+    """
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get(f"/ontologies/{ontology_id}/score"))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    quality = result.get("quality", {})
+    score = quality.get("overall_score", "?")
+    grade = quality.get("grade", "?")
+    # Use server-provided is_buildable — avoids hardcoded threshold in CLI
+    buildable = quality.get("is_buildable", False)
+    buildable_label = "  ✓ buildable" if buildable else "  below threshold"
+    click.echo(f"Score: {score}/100 (grade: {grade}{buildable_label})")
+
+    gaps = result.get("gaps", [])
+    if gaps:
+        click.echo(f"\nGaps ({len(gaps)}):")
+        for g in gaps:
+            pts = g.get("impact_points", 0)
+            crit = g.get("criterion", "")
+            tip = g.get("specific_tip", "")
+            click.echo(f"  [{pts:+d}pts] {crit}: {tip}")
+    else:
+        click.echo("No gaps — ontology meets quality threshold.")
+
+
 @main.command("property-search")
 @click.argument("property")
 @click.option("--value", default=None, help="Filter by property value")
