@@ -1,6 +1,7 @@
 """Main CLI entry point — click command groups."""
 
 import asyncio
+import json
 import sys
 from urllib.parse import quote
 
@@ -545,3 +546,83 @@ def content_extract(ctx, ids, graph_id):
     click.echo(f"Queued {len(job_ids)} item(s) for extraction:")
     for jid in job_ids:
         click.echo(f"  Job: {jid}")
+
+
+# -- traversal commands --
+
+@main.command()
+@click.argument("source")
+@click.argument("target")
+@click.option("--depth", default=3, help="Maximum path length (default 3)")
+@click.pass_context
+def paths(ctx, source, target, depth):
+    """Find shortest paths between SOURCE and TARGET entities."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get("/tools/paths", params={
+        "source": source, "target": target, "max_depth": depth,
+    }))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    path_list = result.get("paths", [])
+    if not path_list:
+        click.echo("No paths found.")
+        return
+
+    click.echo(f"\nPaths from '{result.get('source')}' to '{result.get('target')}':\n")
+    for i, p in enumerate(path_list, 1):
+        entities = p.get("entities", [])
+        rels = p.get("relationships", [])
+        parts = []
+        for j, ent in enumerate(entities):
+            parts.append(ent.get("name", "?"))
+            if j < len(rels):
+                parts.append(f" -[{rels[j].get('type', '?')}]-> ")
+        click.echo(f"  {i}. {''.join(parts)}")
+    click.echo()
+
+
+@main.command()
+@click.argument("name")
+@click.option("--depth", default=2, help="Number of hops (default 2)")
+@click.option("--limit", default=50, help="Max nodes to return (default 50)")
+@click.pass_context
+def neighborhood(ctx, name, depth, limit):
+    """Explore the neighborhood around entity NAME up to N hops away."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    encoded_name = quote(name, safe="")
+    result = run_async(client.get(
+        f"/tools/entity/{encoded_name}/neighborhood",
+        params={"depth": depth, "limit": limit},
+    ))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    nodes = result.get("nodes", [])
+    if not nodes:
+        click.echo(f"No neighbors found for '{name}'.")
+        return
+
+    for n in nodes:
+        summary = n.get("summary") or ""
+        if len(summary) > 50:
+            summary = summary[:47] + "..."
+        n["summary_short"] = summary
+
+    format_output(
+        nodes,
+        fmt=fmt,
+        columns=[
+            ("name", "Name"),
+            ("entity_type", "Type"),
+            ("distance", "Distance"),
+            ("summary_short", "Summary"),
+        ],
+        title=f"Neighborhood: {name} (depth={depth})",
+    )

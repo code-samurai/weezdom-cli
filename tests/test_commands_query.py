@@ -287,3 +287,109 @@ class TestSourcesCommand:
             assert body["limit"] == 5  # default
             assert req.headers["x-api-key"] == "wdm_testkey12345678"
             assert req.headers["x-graph-id"] == "graph-uuid-1"
+
+
+PATHS_RESPONSE = {
+    "source": "Progressive Profiling",
+    "target": "Lead Scoring",
+    "paths": [
+        {
+            "entities": [
+                {"name": "Progressive Profiling", "entity_type": "Technique"},
+                {"name": "Survey Fatigue", "entity_type": "Problem"},
+                {"name": "Lead Scoring", "entity_type": "Metric"},
+            ],
+            "relationships": [
+                {"type": "SOLVES", "fact": None},
+                {"type": "IMPROVES", "fact": None},
+            ],
+        }
+    ],
+}
+
+NEIGHBORHOOD_RESPONSE = {
+    "center": "Progressive Profiling",
+    "depth": 2,
+    "nodes": [
+        {"name": "Survey Fatigue", "entity_type": "Problem", "summary": "Fatigue from surveys", "distance": 1},
+        {"name": "Lead Scoring", "entity_type": "Metric", "summary": "Score leads", "distance": 2},
+    ],
+}
+
+
+class TestPathsCommand:
+    def test_paths_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "paths",
+                                          "Progressive Profiling", "Lead Scoring"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["source"] == "Progressive Profiling"
+            assert len(data["paths"]) == 1
+
+    def test_paths_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "paths",
+                                          "Progressive Profiling", "Lead Scoring"])
+            assert result.exit_code == 0
+            assert "Progressive Profiling" in result.output
+            assert "SOLVES" in result.output
+
+    def test_paths_no_paths_found(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get("/tools/paths").mock(return_value=httpx.Response(200, json={
+                "source": "A", "target": "B", "paths": []
+            }))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "paths", "A", "B"])
+            assert result.exit_code == 0
+            assert "No paths found" in result.output
+
+    def test_paths_sends_correct_params(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            route = rsps.get("/tools/paths").mock(
+                return_value=httpx.Response(200, json=PATHS_RESPONSE))
+            runner = CliRunner()
+            runner.invoke(main, ["paths", "Entity A", "Entity B", "--depth", "4"])
+            assert route.called
+            url_str = str(route.calls[0].request.url)
+            assert "source=Entity" in url_str
+            assert "max_depth=4" in url_str
+
+
+class TestNeighborhoodCommand:
+    def test_neighborhood_json_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json=NEIGHBORHOOD_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "json", "neighborhood",
+                                          "Progressive Profiling"])
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["center"] == "Progressive Profiling"
+            assert len(data["nodes"]) == 2
+
+    def test_neighborhood_table_output(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json=NEIGHBORHOOD_RESPONSE))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "neighborhood",
+                                          "Progressive Profiling"])
+            assert result.exit_code == 0
+            assert "Survey Fatigue" in result.output
+            assert "Lead Scoring" in result.output
+
+    def test_neighborhood_no_nodes(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.get(url__regex=r'/tools/entity/.*/neighborhood').mock(
+                return_value=httpx.Response(200, json={"center": "Unknown", "depth": 2, "nodes": []}))
+            runner = CliRunner()
+            result = runner.invoke(main, ["--format", "table", "neighborhood", "Unknown"])
+            assert result.exit_code == 0
+            assert "No neighbors found" in result.output
