@@ -265,3 +265,86 @@ class TestOntologyScoreCommand:
             runner = CliRunner()
             result = runner.invoke(main, ["ontology", "score", "missing"])
         assert result.exit_code == 1
+
+
+IMPROVE_RESPONSE = {
+    "ontology_id": "ont-1",
+    "new_version_id": "ver-2",
+    "new_version": 2,
+    "quality": {"overall_score": 72, "grade": "B", "is_buildable": True},
+}
+
+UPDATES_DICT = {
+    "entity_types": [
+        {
+            "name": "Revenue",
+            "description": "Updated",
+            "examples": [{"text": "Q2 deal", "why": "Revenue realized"}],
+        }
+    ]
+}
+
+
+class TestOntologyImproveCommand:
+    def test_improve_with_updates_file_shows_new_version(self, mock_config, tmp_path):
+        updates_file = tmp_path / "updates.json"
+        updates_file.write_text(json.dumps(UPDATES_DICT))
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["--format", "table", "ontology", "improve", "ont-1",
+                 "--updates-file", str(updates_file)],
+            )
+        assert result.exit_code == 0, result.output
+        assert "version 2" in result.output
+        assert "72" in result.output
+
+    def test_improve_json_output(self, mock_config, tmp_path):
+        updates_file = tmp_path / "updates.json"
+        updates_file.write_text(json.dumps(UPDATES_DICT))
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["--format", "json", "ontology", "improve", "ont-1",
+                 "--updates-file", str(updates_file)],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["new_version_id"] == "ver-2"
+
+    def test_improve_invalid_json_exits_1(self, mock_config, tmp_path):
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text("not json {")
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["ontology", "improve", "ont-1", "--updates-file", str(bad_file)]
+        )
+        assert result.exit_code == 1
+        assert "not valid JSON" in result.output
+
+    def test_improve_stdin_reads_updates(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.post("/ontologies/ont-1/improve").mock(
+                return_value=httpx.Response(200, json=IMPROVE_RESPONSE)
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main,
+                ["ontology", "improve", "ont-1", "--updates-file", "-"],
+                input=json.dumps(UPDATES_DICT),
+            )
+        assert result.exit_code == 0, result.output
+
+    def test_improve_no_file_no_stdin_exits_1(self, mock_config):
+        # CliRunner provides empty stdin (isatty=False) — json.loads("") raises JSONDecodeError
+        runner = CliRunner()
+        result = runner.invoke(main, ["ontology", "improve", "ont-1"])
+        assert result.exit_code == 1
