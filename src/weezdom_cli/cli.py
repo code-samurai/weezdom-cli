@@ -655,3 +655,93 @@ def neighborhood(ctx, name, depth, limit):
         ],
         title=f"Neighborhood: {name} (depth={depth})",
     )
+
+
+# -- workspace commands --
+
+@main.group()
+@click.pass_context
+def workspace(ctx):
+    """Explore workspaces and search across graphs."""
+    ctx.ensure_object(dict)
+
+
+@workspace.command("search")
+@click.argument("query")
+@click.option("--workspace-id", "-w", default=None, help="Workspace ID to search within")
+@click.option("--limit", default=10, help="Max results (default 10)")
+@click.pass_context
+def workspace_search(ctx, query, workspace_id, limit):
+    """Search across graphs in a workspace for QUERY."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    body = {"query": query, "limit": limit}
+    if workspace_id:
+        body["workspace_id"] = workspace_id
+    result = run_async(client.post("/search/workspace", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    items = result.get("results", [])
+    if not items:
+        click.echo("No results found.")
+        if not workspace_id:
+            click.echo("Tip: use -w WORKSPACE_ID to search a specific workspace.")
+            click.echo("Run 'weezdom workspace info' to list available workspaces.")
+        return
+
+    for item in items:
+        fact = item.get("fact", "")
+        if len(fact) > 60:
+            fact = fact[:57] + "..."
+        item["fact_short"] = fact
+
+    format_output(
+        items,
+        fmt=fmt,
+        columns=[
+            ("fact_short", "Fact"),
+            ("source_graph_name", "Graph"),
+            ("graph_role", "Role"),
+            ("score", "Score"),
+        ],
+        title=f"Workspace search: {query}",
+    )
+
+
+@workspace.command("info")
+@click.pass_context
+def workspace_info(ctx):
+    """List all workspaces for this tenant."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get("/insights/workspaces"))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    workspaces = result.get("workspaces", [])
+    if not workspaces:
+        click.echo("No workspaces found.")
+        return
+
+    for ws in workspaces:
+        if ws.get("id") and len(str(ws["id"])) > 12:
+            ws["id_short"] = str(ws["id"])[:12] + "..."
+        else:
+            ws["id_short"] = ws.get("id", "")
+
+    format_output(
+        workspaces,
+        fmt=fmt,
+        columns=[
+            ("id_short", "ID"),
+            ("name", "Name"),
+            ("graph_count", "Graphs"),
+            ("entity_count", "Entities"),
+        ],
+        title="Workspaces",
+    )
