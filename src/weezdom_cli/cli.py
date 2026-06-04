@@ -870,46 +870,111 @@ def ontology_create(ctx, name, spec_file):
 @click.option("--goal", multiple=True, help="Goal for the knowledge graph (repeatable)")
 @click.option("--iterations", default=3, show_default=True,
               help="Max improvement cycles (each ~15-60s)")
-@click.option("--timeout", default=300, show_default=True,
-              help="HTTP timeout in seconds (build takes 1–4 min)")
 @click.pass_context
-def ontology_build(ctx, name, description, goal, iterations, timeout):
+def ontology_build(ctx, name, description, goal, iterations):
     """Build a production-quality ontology using server-side AI.
 
-    One call: AI generates spec, scores it, iterates until score >= 70.
-    Takes 1-4 minutes. If interrupted, run 'weezdom ontology list' to check completion.
+    Submits an async build job and polls until complete (~1-4 min).
+    If interrupted, use: weezdom ontology build-status <job_id>
     Example: weezdom ontology build "Revenue Brain" "Track SaaS pricing" --goal "find patterns"
     """
+    import time
     fmt = _get_format(ctx)
-    click.echo(
-        f"Building '{name}'... (this may take up to {timeout}s depending on --iterations)",
-        err=True,
-    )
+    timeout_secs = iterations * 90 + 60
     body = {
         "name": name,
         "description": description,
         "goals": list(goal),
         "max_iterations": iterations,
     }
-    client = WeezdomClient(timeout=timeout)
-    result = run_async(client.post("/ontologies/build", json=body))
+    client = WeezdomClient()
+    enqueue_result = run_async(client.post("/ontologies/build", json=body))
+    job_id = enqueue_result.get("job_id")
+    if not job_id:
+        click.echo(f"Error: server did not return job_id: {enqueue_result}", err=True)
+        sys.exit(1)
+
+    click.echo(
+        f"Building '{name}'... (job: {job_id}, timeout: {timeout_secs}s)",
+        err=True,
+    )
+
+    deadline = time.monotonic() + timeout_secs
+    result = {}
+    while True:
+        if time.monotonic() > deadline:
+            click.echo("", err=True)
+            click.echo(
+                f"Timed out — job still running. "
+                f"Check with: weezdom ontology build-status {job_id}",
+                err=True,
+            )
+            sys.exit(1)
+
+        result = run_async(client.get(f"/ontologies/build-status/{job_id}"))
+        status = result.get("status")
+
+        if status == "completed":
+            click.echo("", err=True)
+            break
+        if status in ("failed", "dlq"):
+            click.echo("", err=True)
+            click.echo(f"Error: build failed — {result.get('error', 'unknown')}", err=True)
+            sys.exit(1)
+
+        click.echo(".", nl=False, err=True)
+        time.sleep(5)
+
+    build_result = result.get("result") or {}
 
     if fmt == "json":
         format_output(result, fmt="json")
         return
 
-    ont_id = result.get("ontology_id", "?")
-    score = (result.get("quality") or {}).get("overall_score", "?")
-    iters = result.get("iterations_used", "?")
-    reached = result.get("reached_threshold", False)
+    ont_id = build_result.get("ontology_id", "?")
+    score = (build_result.get("quality") or {}).get("overall_score", "?")
+    iters = build_result.get("iterations_used", "?")
+    reached = build_result.get("reached_threshold", False)
     click.echo(
         f"Built: ontology_id={ont_id}  score={score}/100  "
         f"iterations={iters}  threshold={'yes' if reached else 'no'}"
     )
     if not reached:
+        click.echo(f"Tip: threshold not reached — try --iterations {iterations + 2}")
+
+
+@ontology.command("build-status")
+@click.argument("job_id")
+@click.pass_context
+def ontology_build_status(ctx, job_id):
+    """Check the status of an ontology build job.
+
+    Use after a timeout or interrupted 'ontology build' session.
+    Example: weezdom ontology build-status <job_id>
+    """
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    result = run_async(client.get(f"/ontologies/build-status/{job_id}"))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    status = result.get("status", "unknown")
+    click.echo(f"Status: {status}")
+
+    build_result = result.get("result") or {}
+    if build_result:
+        ont_id = build_result.get("ontology_id", "?")
+        score = (build_result.get("quality") or {}).get("overall_score", "?")
+        iters = build_result.get("iterations_used", "?")
+        reached = build_result.get("reached_threshold", False)
         click.echo(
-            f"Tip: threshold not reached — try --iterations {iterations + 2}"
+            f"Built: ontology_id={ont_id}  score={score}/100  "
+            f"iterations={iters}  threshold={'yes' if reached else 'no'}"
         )
+    elif result.get("error"):
+        click.echo(f"Error: {result['error']}", err=True)
 
 
 @main.command("property-search")
