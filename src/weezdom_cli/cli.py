@@ -332,6 +332,8 @@ def graph_list(ctx):
     for g in graphs:
         if g.get("id") and len(str(g["id"])) > 12:
             g["id"] = str(g["id"])[:12] + "..."
+        if isinstance(g.get("status"), dict):
+            g["status"] = g["status"].get("label", "")
 
     format_output(graphs, fmt=fmt, columns=[
         ("id", "ID"),
