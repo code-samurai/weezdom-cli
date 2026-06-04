@@ -30,7 +30,10 @@ class WeezdomClient:
         if resp.status_code == 404:
             raise click_exit(f"Not found: {resp.url.path}")
         if resp.status_code >= 400:
-            detail = resp.json().get("detail", resp.text) if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+            if resp.headers.get("content-type", "").startswith("application/json"):
+                detail = resp.json().get("detail", resp.text[:200])
+            else:
+                detail = resp.text[:200]  # truncate to avoid leaking full proxy/server error bodies
             raise click_exit(f"API error ({resp.status_code}): {detail}")
 
     async def get(self, path: str, params: dict = None) -> dict:

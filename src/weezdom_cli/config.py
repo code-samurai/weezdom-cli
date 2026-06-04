@@ -20,7 +20,7 @@ DEFAULTS = {
 
 
 def _ensure_dir():
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 
 
 def load() -> dict:

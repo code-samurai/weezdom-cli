@@ -119,8 +119,12 @@ def config_show():
 def config_set(key, value):
     """Set a configuration value."""
     from weezdom_cli import config
+    if key == "api_url" and not value.startswith("https://"):
+        raise click.ClickException("api_url must use https:// to protect your API key in transit.")
     config.set_value(key, value)
-    click.echo(f"Set {key} = {value}")
+    # Mask credential values in output — never echo api_key to terminal
+    display = value[:4] + "***" if key == "api_key" else value
+    click.echo(f"Set {key} = {display}")
 
 
 # -- query commands --

@@ -4,3 +4,11 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
+
+# Credentials and config files with sensitive data
+config/users.json
+config/*.json
+.env
+.env.*
+*.key
+*.pem
