@@ -798,6 +798,120 @@ def ontology_list(ctx):
     )
 
 
+@ontology.command("suggest")
+@click.argument("description")
+@click.option("--goal", multiple=True, help="Goal for the ontology (repeatable)")
+@click.pass_context
+def ontology_suggest(ctx, description, goal):
+    """Generate a scored ontology template for DESCRIPTION.
+
+    Outputs a JSON config_template you can edit and pass to 'ontology create'.
+    Example: weezdom ontology suggest "Track SaaS pricing" --goal "find patterns" > spec.json
+    """
+    client = WeezdomClient()
+    result = run_async(client.post(
+        "/ontologies/suggest",
+        json={"description": description, "goals": list(goal)},
+    ))
+    format_output(result, fmt="json")
+
+
+@ontology.command("create")
+@click.argument("name")
+@click.option("--spec", "spec_file", type=click.File("r"), default="-",
+              help="JSON spec file or stdin (default: stdin). Use output of 'ontology suggest'.")
+@click.pass_context
+def ontology_create(ctx, name, spec_file):
+    """Create a new ontology from NAME and a JSON spec.
+
+    Reads spec from --spec FILE or stdin (pipe from 'ontology suggest').
+    Example: weezdom ontology suggest "..." | weezdom ontology create "My Ontology"
+    """
+    fmt = _get_format(ctx)
+    if spec_file.name == "<stdin>" and sys.stdin.isatty():
+        click.echo(
+            "Error: provide --spec FILE or pipe JSON from 'weezdom ontology suggest'.\n"
+            "Example: weezdom ontology suggest \"my domain\" | weezdom ontology create \"Name\"",
+            err=True,
+        )
+        sys.exit(1)
+    try:
+        raw = spec_file.read()
+        spec = json.loads(raw)
+    except json.JSONDecodeError as e:
+        click.echo(f"Error: invalid JSON in spec: {e}", err=True)
+        sys.exit(1)
+
+    if "config_template" in spec:
+        spec = spec["config_template"]
+
+    body = {"name": name, **spec}
+    client = WeezdomClient()
+    result = run_async(client.post("/ontologies", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    ont_id = result.get("ontology_id", "?")
+    score = (result.get("quality") or {}).get("overall_score", "?")
+    reached = (result.get("quality") or {}).get("is_buildable", False)
+    click.echo(f"Created: ontology_id={ont_id}  score={score}/100  buildable={reached}")
+    if score != "?" and score < 70:
+        click.echo(
+            "Tip: score below 70 — run 'ontology build' for auto-improvement, "
+            "or edit the spec and re-create."
+        )
+
+
+@ontology.command("build")
+@click.argument("name")
+@click.argument("description")
+@click.option("--goal", multiple=True, help="Goal for the knowledge graph (repeatable)")
+@click.option("--iterations", default=3, show_default=True,
+              help="Max improvement cycles (each ~15-60s)")
+@click.option("--timeout", default=300, show_default=True,
+              help="HTTP timeout in seconds (build takes 1–4 min)")
+@click.pass_context
+def ontology_build(ctx, name, description, goal, iterations, timeout):
+    """Build a production-quality ontology using server-side AI.
+
+    One call: AI generates spec, scores it, iterates until score >= 70.
+    Takes 1-4 minutes. If interrupted, run 'weezdom ontology list' to check completion.
+    Example: weezdom ontology build "Revenue Brain" "Track SaaS pricing" --goal "find patterns"
+    """
+    fmt = _get_format(ctx)
+    click.echo(
+        f"Building '{name}'... (this may take up to {timeout}s depending on --iterations)",
+        err=True,
+    )
+    body = {
+        "name": name,
+        "description": description,
+        "goals": list(goal),
+        "max_iterations": iterations,
+    }
+    client = WeezdomClient(timeout=timeout)
+    result = run_async(client.post("/ontologies/build", json=body))
+
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+
+    ont_id = result.get("ontology_id", "?")
+    score = (result.get("quality") or {}).get("overall_score", "?")
+    iters = result.get("iterations_used", "?")
+    reached = result.get("reached_threshold", False)
+    click.echo(
+        f"Built: ontology_id={ont_id}  score={score}/100  "
+        f"iterations={iters}  threshold={'yes' if reached else 'no'}"
+    )
+    if not reached:
+        click.echo(
+            f"Tip: threshold not reached — try --iterations {iterations + 2}"
+        )
+
+
 @main.command("property-search")
 @click.argument("property")
 @click.option("--value", default=None, help="Filter by property value")

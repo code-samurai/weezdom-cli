@@ -11,11 +11,12 @@ _UNSET = object()
 class WeezdomClient:
     """Thin httpx wrapper that attaches auth and graph headers."""
 
-    def __init__(self, api_url: str = None, api_key: str = None, graph_id: str = _UNSET):
+    def __init__(self, api_url: str = None, api_key: str = None, graph_id: str = _UNSET, timeout: int = 30):
         cfg = config.load()
         self.api_url = (api_url or cfg.get("api_url", "")).rstrip("/")
         self.api_key = api_key or cfg.get("api_key")
         self.graph_id = cfg.get("active_graph_id") if graph_id is _UNSET else graph_id
+        self.timeout = timeout
 
     def _headers(self) -> dict:
         h = {}
@@ -44,22 +45,49 @@ class WeezdomClient:
             raise click_exit(f"API error ({resp.status_code}): {detail}")
 
     async def get(self, path: str, params: dict = None) -> dict:
-        async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=30) as c:
-            resp = await c.get(path, params=params)
-            self._handle_error(resp)
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=self.timeout) as c:
+                resp = await c.get(path, params=params)
+                self._handle_error(resp)
+                return resp.json()
+        except ClickExit:
+            raise
+        except httpx.TimeoutException:
+            raise click_exit(
+                "Request timed out. If running 'ontology build', check "
+                "'weezdom ontology list' — the server may have completed."
+            )
+        except httpx.RequestError as e:
+            raise click_exit(f"Connection error: {e}")
 
     async def post(self, path: str, json: dict = None, data=None, files=None) -> dict:
-        async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=30) as c:
-            resp = await c.post(path, json=json, data=data, files=files)
-            self._handle_error(resp)
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=self.timeout) as c:
+                resp = await c.post(path, json=json, data=data, files=files)
+                self._handle_error(resp)
+                return resp.json()
+        except ClickExit:
+            raise
+        except httpx.TimeoutException:
+            raise click_exit(
+                "Request timed out. If running 'ontology build', check "
+                "'weezdom ontology list' — the server may have completed."
+            )
+        except httpx.RequestError as e:
+            raise click_exit(f"Connection error: {e}")
 
     async def delete(self, path: str) -> dict:
-        async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=30) as c:
-            resp = await c.delete(path)
-            self._handle_error(resp)
-            return resp.json()
+        try:
+            async with httpx.AsyncClient(base_url=self.api_url, headers=self._headers(), timeout=self.timeout) as c:
+                resp = await c.delete(path)
+                self._handle_error(resp)
+                return resp.json()
+        except ClickExit:
+            raise
+        except httpx.TimeoutException:
+            raise click_exit("Request timed out.")
+        except httpx.RequestError as e:
+            raise click_exit(f"Connection error: {e}")
 
     async def validate_auth(self) -> dict:
         """Validate API key against /auth/me. Returns user info or raises."""

@@ -553,3 +553,139 @@ class TestPropertySearchContract:
         body = json.loads(respx_mock.calls[0].request.content)
         assert body["property_name"] == "revenue"
         assert body["limit"] == 50
+
+
+# ---------------------------------------------------------------------------
+# Ontology suggest contract (POST /ontologies/suggest)
+# ---------------------------------------------------------------------------
+
+class TestOntologySuggestContract:
+    """CLI suggest must POST /ontologies/suggest with description and goals."""
+
+    SUGGEST_RESPONSE = {
+        "recommended_graph_role": "subject",
+        "graph_role_reason": "reason",
+        "graph_architecture": {"subject": "s", "intelligence": "i", "reference": "r"},
+        "config_template": {
+            "entity_types": [{"name": "ExampleEntity", "description": "..."}],
+            "relationship_types": [],
+        },
+        "scoring_rubric": {},
+        "example_hunting_instructions": "hunt",
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_suggest_posts_description_and_goals(self, respx_mock):
+        respx_mock.post("/ontologies/suggest").mock(
+            return_value=httpx.Response(200, json=self.SUGGEST_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.post(
+            "/ontologies/suggest",
+            json={"description": "Track sales", "goals": ["segment by stage"]},
+        )
+        assert "config_template" in result
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["description"] == "Track sales"
+        assert body["goals"] == ["segment by stage"]
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_suggest_sends_graph_header(self, respx_mock):
+        respx_mock.post("/ontologies/suggest").mock(
+            return_value=httpx.Response(200, json=self.SUGGEST_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-42")
+        await client.post("/ontologies/suggest", json={"description": "test", "goals": []})
+        req = respx_mock.calls[0].request
+        assert req.headers.get("x-graph-id") == "g-42"
+
+
+# ---------------------------------------------------------------------------
+# Ontology create contract (POST /ontologies)
+# ---------------------------------------------------------------------------
+
+class TestOntologyCreateContract:
+    """CLI create must POST /ontologies with name + entity_types."""
+
+    CREATE_RESPONSE = {
+        "ontology_id": "ont-1", "version_id": "ver-1",
+        "quality": {"overall_score": 55, "grade": "C", "is_buildable": False,
+                    "axes": {}, "weakest_entities": [], "weakest_relationships": [],
+                    "next_actions": []},
+        "gaps": [],
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_create_posts_to_ontologies(self, respx_mock):
+        respx_mock.post("/ontologies").mock(
+            return_value=httpx.Response(201, json=self.CREATE_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.post("/ontologies", json={
+            "name": "Sales CRM",
+            "entity_types": [{"name": "Deal", "description": "A sales deal."}],
+        })
+        assert result["ontology_id"] == "ont-1"
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["name"] == "Sales CRM"
+        assert len(body["entity_types"]) == 1
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_create_409_raises_click_exit(self, respx_mock):
+        respx_mock.post("/ontologies").mock(
+            return_value=httpx.Response(409, json={"detail": "already exists"}))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        from weezdom_cli.client import ClickExit
+        with pytest.raises(ClickExit, match="already exists"):
+            await client.post("/ontologies", json={"name": "X", "entity_types": []})
+
+
+# ---------------------------------------------------------------------------
+# Ontology build contract (POST /ontologies/build)
+# ---------------------------------------------------------------------------
+
+class TestOntologyBuildContract:
+    """CLI build must POST /ontologies/build with name, description, goals, max_iterations."""
+
+    BUILD_RESPONSE = {
+        "ontology_id": "ont-2", "version_id": "ver-2",
+        "quality": {"overall_score": 75, "grade": "B", "is_buildable": True,
+                    "axes": {}, "weakest_entities": [], "weakest_relationships": [],
+                    "next_actions": []},
+        "gaps": [],
+        "iterations_used": 1,
+        "reached_threshold": True,
+    }
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_build_posts_body(self, respx_mock):
+        respx_mock.post("/ontologies/build").mock(
+            return_value=httpx.Response(200, json=self.BUILD_RESPONSE))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.post("/ontologies/build", json={
+            "name": "Sales AI", "description": "Track sales",
+            "goals": ["find patterns"], "max_iterations": 3,
+        })
+        assert result["reached_threshold"] is True
+        body = json.loads(respx_mock.calls[0].request.content)
+        assert body["name"] == "Sales AI"
+        assert body["max_iterations"] == 3
+
+    @pytest.mark.asyncio
+    async def test_build_timeout_uses_custom_value(self):
+        """WeezdomClient(timeout=300) must store timeout=300 (T4 adds the param)."""
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1", timeout=300)
+        assert client.timeout == 300
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_build_502_raises_click_exit(self, respx_mock):
+        respx_mock.post("/ontologies/build").mock(
+            return_value=httpx.Response(502, json={"detail": "LLM generation failed"}))
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        from weezdom_cli.client import ClickExit
+        with pytest.raises(ClickExit, match="API error"):
+            await client.post("/ontologies/build",
+                              json={"name": "x", "description": "y", "goals": []})
