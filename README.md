@@ -64,7 +64,22 @@ weezdom workspace search <query> [-w WORKSPACE_ID] [--limit N]  # Search across 
 ### Ontologies
 
 ```bash
-weezdom ontology list    # List tenant ontologies with version count and quality score
+weezdom ontology list                                               # List ontologies with version count and quality score
+weezdom ontology suggest "<description>" [--goal TEXT]...           # Generate a scored ontology template (no DB write)
+weezdom ontology create <name> [--spec FILE|-]                      # Create ontology from structured spec (file or stdin)
+weezdom ontology build <name> "<description>" [--goal TEXT]... [--iterations N]  # Autonomous AI build (~1–4 min, polls until done)
+weezdom ontology build-status <job_id>                              # Check status of a build job (use after timeout/interruption)
+```
+
+Pipe `suggest` into `create` for a two-step workflow:
+```bash
+weezdom ontology suggest "Track SaaS pricing metrics" --goal "find patterns" > spec.json
+weezdom ontology create "Revenue Brain" --spec spec.json
+```
+
+Or let the AI do everything in one command:
+```bash
+weezdom ontology build "Revenue Brain" "Track SaaS pricing" --goal "find patterns" --iterations 3
 ```
 
 ### Content Management
