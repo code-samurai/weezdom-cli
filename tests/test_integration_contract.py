@@ -753,3 +753,20 @@ class TestOntologyImproveContract:
         body = _json.loads(req.content)
         assert "updates" in body
         assert req.method == "POST"
+
+
+class TestOntologyDeleteContract:
+    """CLI delete must call DELETE /ontologies/{id} with X-API-Key header."""
+
+    @respx.mock(base_url=API_URL)
+    @pytest.mark.asyncio
+    async def test_delete_sends_delete_to_correct_path(self, respx_mock):
+        respx_mock.delete("/ontologies/ont-del-1").mock(
+            return_value=httpx.Response(200, json={"success": True})
+        )
+        client = WeezdomClient(api_url=API_URL, api_key="wdm_key", graph_id="g-1")
+        result = await client.delete("/ontologies/ont-del-1")
+        assert result["success"] is True
+        req = respx_mock.calls[0].request
+        assert req.method == "DELETE"
+        assert req.headers["x-api-key"] == "wdm_key"

@@ -1071,6 +1071,27 @@ def ontology_improve(ctx, ontology_id, updates_file):
     click.echo(f"New version ID: {result.get('new_version_id')}")
 
 
+@ontology.command("delete")
+@click.argument("ontology_id")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt")
+@click.pass_context
+def ontology_delete(ctx, ontology_id, force):
+    """Delete an ontology (must not be referenced by any graphs).
+
+    Use --force to skip the confirmation prompt.
+    Example: weezdom ontology delete <ontology_id> --force
+    """
+    client = WeezdomClient()
+
+    if not force:
+        if not click.confirm(f"Delete ontology {ontology_id}?"):
+            click.echo("Cancelled.")
+            return
+
+    run_async(client.delete(f"/ontologies/{ontology_id}"))
+    click.echo(f"Deleted: {ontology_id}")
+
+
 @main.command("property-search")
 @click.argument("property")
 @click.option("--value", default=None, help="Filter by property value")

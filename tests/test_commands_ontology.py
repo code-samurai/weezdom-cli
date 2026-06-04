@@ -348,3 +348,51 @@ class TestOntologyImproveCommand:
         runner = CliRunner()
         result = runner.invoke(main, ["ontology", "improve", "ont-1"])
         assert result.exit_code == 1
+
+
+class TestOntologyDeleteCommand:
+    def test_delete_with_force_skips_confirmation(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-del-1").mock(
+                return_value=httpx.Response(200, json={"success": True})
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-del-1", "--force"]
+            )
+        assert result.exit_code == 0, result.output
+        assert "Deleted" in result.output
+
+    def test_delete_without_force_prompts_and_proceeds(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-del-2").mock(
+                return_value=httpx.Response(200, json={"success": True})
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-del-2"], input="y\n"
+            )
+        assert result.exit_code == 0, result.output
+        assert "Deleted" in result.output
+
+    def test_delete_cancel_aborts(self, mock_config):
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["ontology", "delete", "ont-3"], input="n\n"
+        )
+        assert result.exit_code == 0
+        assert "Cancelled." in result.output
+
+    def test_delete_409_exits_1(self, mock_config):
+        with respx.mock(base_url=API_URL) as rsps:
+            rsps.delete("/ontologies/ont-in-use").mock(
+                return_value=httpx.Response(
+                    409, json={"detail": "Cannot delete: ontology is in use"}
+                )
+            )
+            runner = CliRunner()
+            result = runner.invoke(
+                main, ["ontology", "delete", "ont-in-use", "--force"]
+            )
+        assert result.exit_code == 1
+        assert "Cannot delete" in result.output
