@@ -12,3 +12,6 @@ config/*.json
 .env.*
 *.key
 *.pem
+
+# Local config overrides
+~/.weezdom/
