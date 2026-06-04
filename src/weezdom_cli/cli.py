@@ -745,3 +745,52 @@ def workspace_info(ctx):
         ],
         title="Workspaces",
     )
+
+
+# -- ontology commands --
+
+@main.group()
+@click.pass_context
+def ontology(ctx):
+    """Manage ontologies."""
+    ctx.ensure_object(dict)
+
+
+@ontology.command("list")
+@click.pass_context
+def ontology_list(ctx):
+    """List all ontologies for this tenant."""
+    fmt = _get_format(ctx)
+    client = WeezdomClient()
+    # GET /ontologies/list returns a raw JSON array (SC-1: not dict-wrapped)
+    result = run_async(client.get("/ontologies/list"))
+    rows = result if isinstance(result, list) else []
+
+    if fmt == "json":
+        format_output(rows, fmt="json")
+        return
+
+    if not rows:
+        click.echo("No ontologies found.")
+        return
+
+    for row in rows:
+        if row.get("id") and len(str(row["id"])) > 12:
+            row["id_short"] = str(row["id"])[:12] + "..."
+        else:
+            row["id_short"] = row.get("id", "")
+        score = (row.get("status") or {}).get("overall_score")
+        row["score_str"] = str(score) if score is not None else "—"
+
+    format_output(
+        rows,
+        fmt=fmt,
+        columns=[
+            ("id_short", "ID"),
+            ("name", "Name"),
+            ("version_count", "Versions"),
+            ("graph_count", "Graphs"),
+            ("score_str", "Score"),
+        ],
+        title="Ontologies",
+    )
