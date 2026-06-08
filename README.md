@@ -160,6 +160,22 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
+### Live Smoke Tests
+
+To verify response-shape contracts against the real API:
+
+```bash
+RUN_LIVE=1 WEEZDOM_API_KEY=wdm_<your-key> pytest tests/test_live_smoke.py -v -s
+```
+
+Optional — override the default production URL:
+
+```bash
+WEEZDOM_BASE_URL=https://... RUN_LIVE=1 WEEZDOM_API_KEY=wdm_<your-key> pytest tests/test_live_smoke.py -v -s
+```
+
+Prerequisites: tenant account must have at least one active knowledge graph. All 7 tests skip automatically in standard CI (`RUN_LIVE` is not set).
+
 ## License
 
 MIT
