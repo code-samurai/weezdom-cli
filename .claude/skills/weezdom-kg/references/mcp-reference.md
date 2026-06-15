@@ -6,6 +6,8 @@
 
 Start every session with `ws_get_workspace_info` to discover workspace structure and graph roles.
 
+> **Content ingestion is not available via MCP.** There are no `ws_content_*` tools. To ingest URLs, upload files, or trigger extraction, use the CLI (`weezdom content add`, `weezdom content upload`, `weezdom content extract`) or REST (`POST /content`, `POST /content/{id}/extract`).
+
 ---
 
 ## Read Tools
