@@ -88,12 +88,12 @@ weezdom ontology build "Revenue Brain" "Track SaaS pricing" --goal "find pattern
 ### Content Management
 
 ```bash
-weezdom content list [--type TYPE] [--status STATUS] [--tag TAG]
-weezdom content add <url> [<url>...] [--tag TAG]    # Ingest URLs into knowledge base
-weezdom content upload <file> [--tag TAG]            # Upload a file (PDF, DOCX, etc.)
-weezdom content view <id>                            # View the text of a content item
-weezdom content delete <id> [--force]                # Delete (prompts for confirmation)
-weezdom content extract <id> [--graph ID]            # Trigger extraction to a graph
+weezdom content list [--type TYPE] [--status STATUS] [--tag TAG] [--limit N]
+weezdom content add <url> [<url>...] [--tag TAG]     # Ingest URLs into knowledge base
+weezdom content upload <file> [--tag TAG]             # Upload a file (PDF, DOCX, etc.)
+weezdom content view <id>                             # View the text of a content item
+weezdom content delete <id> [--force]                 # Delete (prompts for confirmation)
+weezdom content extract <id> [<id>...] [--graph ID]  # Trigger extraction to a graph
 ```
 
 ### Graph Management
