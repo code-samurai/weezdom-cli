@@ -142,6 +142,8 @@ POST /search/workspace        {query, workspace_id}   (no X-Graph-Id needed)
 
 Only **intelligence-role graphs** accept direct entity writes. Subject and reference graphs return 403.
 
+> **CLI users:** The CLI has no entity-write commands. Switch to MCP (`ws_write_entity`, `ws_write_relationship`) or REST (`POST /knowledge-graphs/data/{id}/entities`) for this operation.
+
 ### MCP
 
 Required sequence:
@@ -172,6 +174,8 @@ DELETE /knowledge-graphs/data/{id}/relationships/{src}/{tgt}/{rel}
 ---
 
 ## Bootstrapping a New Graph
+
+> **CLI users:** The CLI has no graph-create command. Use MCP (`ws_create_graph`) or REST (`POST /knowledge-graphs/data`) to create a graph, then use the CLI for content ingestion (`weezdom content add`, `weezdom content extract`) and ontology management.
 
 Two flows depending on intended graph role:
 
@@ -244,6 +248,21 @@ weezdom ontology delete <ontology-id> [--force]
 weezdom ontology suggest "Track SaaS metrics" --goal "find patterns" > spec.json
 weezdom ontology create "Revenue Brain" --spec spec.json
 ```
+
+### REST
+
+```
+GET    /ontologies                          → list (quality ≥ 70 only)
+POST   /ontologies                          {name, config}  → {ontology_id, quality, gaps}
+POST   /ontologies/suggest                  {description, goals?}
+GET    /ontologies/{id}/score               → {overall_score, grade, gaps}
+POST   /ontologies/{id}/improve             {improvements}  → {new_version_id, quality}
+POST   /ontologies/build                    {name, description, goals?}  → {job_id}
+GET    /ontologies/build-status/{job_id}    → {status, ontology_id?}
+DELETE /ontologies/{id}
+```
+
+> **MCP users:** if you need to manage ontologies from a non-CLI runtime, use these REST endpoints or the MCP `ws_*` ontology tools above.
 
 ---
 
