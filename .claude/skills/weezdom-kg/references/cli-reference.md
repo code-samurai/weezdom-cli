@@ -166,6 +166,23 @@ weezdom content list [--limit N]                         # default 20
 
 ## Ontology Commands
 
+Reader / Hermes keys (viewer, viewer service account, workspace reader) use the search commands above. They must not call import, save, or publish.
+
+Personal author keys (unscoped admin or editor) write the ontology document:
+
+```bash
+weezdom ontology import --file spec.json [--name NAME]         # create a draft ontology (POST /ontologies)
+weezdom ontology import --file spec.json --ontology-id <id>    # new draft on an existing ontology
+weezdom ontology save --ontology-id <id> --file spec.json      # same draft write as import --ontology-id
+weezdom ontology publish --ontology-id <id> [--version-id <id>]  # live version; does not materialise
+```
+
+Import and save do not publish. Publish does not enqueue `graph_publish` and does not write FalkorDB or Weaviate. Materialise is out of scope for this CLI. `--format json` prints the API object. Validation exits 2. A 403 exits 1 with: this key cannot author an ontology; use an unscoped personal admin or editor key.
+
+`WEEZDOM_API_KEY` overrides the stored login key. `WEEZDOM_BASE_URL` overrides `api_url`. These calls do not send `X-Graph-Id`.
+
+Autonomous build (suggest spec and server-side AI), separate from the deep JSON document:
+
 ```bash
 weezdom ontology list
 weezdom ontology suggest "<description>" [--goal TEXT]...      # generate scored template (nothing persisted)

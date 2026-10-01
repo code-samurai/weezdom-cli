@@ -269,6 +269,37 @@ Type breakdown + top entities.
 
 ---
 
+## Ontology document authoring
+
+Personal author path only: unscoped `X-API-Key` for an admin or editor. Viewer, Hermes, and workspace reader keys receive 403. Do not send `X-Graph-Id`.
+
+Import and save write a draft `ontology_versions` document. Publish makes that draft the live ontology version. Publish does not materialise a graph.
+
+### POST /ontologies
+Create a draft ontology from a structural document (`weezdom ontology import` without `--ontology-id`).
+
+```json
+{"name": "Practice operations", "entity_types": [{"name": "Practice"}], "relationship_types": []}
+```
+
+### POST /ontologies/{ontology_id}/import
+New draft version of an existing ontology (`weezdom ontology import --ontology-id` and `weezdom ontology save`). Publish flags and `graph_id` are not part of this body. Response includes `"published": false`.
+
+### POST /ontologies/{ontology_id}/publish
+Make a draft the live ontology version (`weezdom ontology publish`). Optional `version_id`. This handler does not enqueue `graph_publish` and does not write FalkorDB or Weaviate.
+
+```json
+{}
+```
+
+or
+
+```json
+{"version_id": "<draft-version-uuid>"}
+```
+
+---
+
 ## Bootstrap Flows
 
 ### Subject graph (content → extraction)

@@ -8,6 +8,7 @@ from urllib.parse import quote
 import click
 
 from weezdom_cli.client import ClickExit, WeezdomClient
+from weezdom_cli.ontology_authoring import AuthoringError
 from weezdom_cli.output import format_output
 
 
@@ -1069,6 +1070,108 @@ def ontology_improve(ctx, ontology_id, updates_file):
         f"Improved: version {result.get('new_version')} | score: {score}/100"
     )
     click.echo(f"New version ID: {result.get('new_version_id')}")
+
+
+def _author_fail(ctx, exc: AuthoringError):
+    """Print an authoring error. JSON goes to stdout for agents."""
+    fmt = _get_format(ctx)
+    if fmt == "json":
+        click.echo(json.dumps(exc.payload()))
+    else:
+        click.echo(f"Error: {exc.message}", err=True)
+    sys.exit(exc.exit_code)
+
+
+def _print_author_result(ctx, result: dict, action: str):
+    fmt = _get_format(ctx)
+    if fmt == "json":
+        format_output(result, fmt="json")
+        return
+    ont_id = result.get("ontology_id", "?")
+    version_id = result.get("version_id") or result.get("new_version_id") or "?"
+    if action == "publish":
+        click.echo(
+            f"Published: ontology_id={ont_id}  version_id={version_id}  "
+            "materialise=no"
+        )
+        click.echo("Publish made this version the live ontology document. It did not write a graph.")
+        return
+    click.echo(
+        f"Draft: ontology_id={ont_id}  version_id={version_id}  published=false"
+    )
+
+
+@ontology.command("import")
+@click.option("--file", "file_path", required=True, type=click.Path(exists=True, dir_okay=False),
+              help="Ontology JSON document (or an object with a config wrapper).")
+@click.option("--name", default="",
+              help="Name when creating. Defaults to the file's name. Ignored with --ontology-id.")
+@click.option("--ontology-id", default="",
+              help="Existing ontology. Omit to create a new draft ontology.")
+@click.pass_context
+def ontology_import(ctx, file_path, name, ontology_id):
+    """Import a JSON document as a draft ontology version. Does not publish.
+
+    Without --ontology-id, creates a new ontology (POST /ontologies).
+    With --ontology-id, writes a new draft on that ontology
+    (POST /ontologies/{id}/import).
+
+    Needs an unscoped personal admin or editor key
+    (weezdom auth login, or WEEZDOM_API_KEY). Viewer, Hermes, and
+    workspace reader keys are refused.
+
+    This is deep JSON authoring of one ontology document. For the
+    autonomous builder, use ontology suggest / create / build.
+    """
+    from weezdom_cli.ontology_authoring import import_document
+
+    try:
+        result = import_document(file_path, name=name, ontology_id=ontology_id)
+    except AuthoringError as exc:
+        _author_fail(ctx, exc)
+    _print_author_result(ctx, result, "import")
+
+
+@ontology.command("save")
+@click.option("--ontology-id", required=True, help="Ontology that receives the new draft version.")
+@click.option("--file", "file_path", required=True, type=click.Path(exists=True, dir_okay=False),
+              help="Ontology JSON document (or an object with a config wrapper).")
+@click.pass_context
+def ontology_save(ctx, ontology_id, file_path):
+    """Save a JSON document as a new draft version. Does not publish.
+
+    POST /ontologies/{ontology-id}/import — the same draft write as
+    ontology import --ontology-id. Publish is a separate command and
+    does not materialise a graph.
+    """
+    from weezdom_cli.ontology_authoring import save_document
+
+    try:
+        result = save_document(file_path, ontology_id)
+    except AuthoringError as exc:
+        _author_fail(ctx, exc)
+    _print_author_result(ctx, result, "save")
+
+
+@ontology.command("publish")
+@click.option("--ontology-id", required=True, help="Ontology whose draft becomes the live version.")
+@click.option("--version-id", default="",
+              help="Draft version to publish. Omit to publish the latest version.")
+@click.pass_context
+def ontology_publish(ctx, ontology_id, version_id):
+    """Make a draft the live ontology version. Does not materialise.
+
+    POST /ontologies/{ontology-id}/publish. This does not enqueue
+    graph_publish and does not write FalkorDB or Weaviate. Applying the
+    live version onto a graph is materialise, which this CLI does not call.
+    """
+    from weezdom_cli.ontology_authoring import publish_document
+
+    try:
+        result = publish_document(ontology_id, version_id=version_id)
+    except AuthoringError as exc:
+        _author_fail(ctx, exc)
+    _print_author_result(ctx, result, "publish")
 
 
 @ontology.command("delete")

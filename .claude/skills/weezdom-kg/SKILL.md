@@ -15,11 +15,18 @@ Enable AI agents to use Weezdom as a knowledge layer — querying, writing, and 
 
 | Path | Best for | Write support |
 |------|----------|---------------|
-| **CLI** (`weezdom`) | Local dev, exploration, content management | Read + manage only (no entity writes) |
+| **CLI** (`weezdom`) | Local dev, exploration, ontology documents | Read + ontology document authoring. No entity writes |
 | **MCP** (`ws_*` tools) | Claude agents, Claude Desktop | Full — read, write, bootstrap, ontology |
 | **REST** (HTTP) | Programmatic agents, non-Claude runtimes | Full — read, write, bootstrap, ontology |
 
-Entity writes (adding facts to a graph) require MCP or REST. The CLI covers search, entity lookup, content ingestion, ontology management, and graph administration.
+Entity writes (adding facts to a graph) require MCP or REST. The CLI covers search, entity lookup, content ingestion, ontology documents (`import` / `save` / `publish`), autonomous ontology build, and graph administration.
+
+Two keys, two jobs:
+
+| Key | Use |
+|-----|-----|
+| **Reader / Hermes** — viewer key, viewer service account, Hermes, or workspace reader | Search and read (`weezdom search`, `entity`, `workspace`). These keys must not author an ontology. |
+| **Personal author** — unscoped personal key for an admin or editor (`weezdom auth login` or `WEEZDOM_API_KEY`) | `weezdom ontology import`, `save`, and `publish`. |
 
 ---
 
@@ -234,6 +241,19 @@ poll ws_get_ontology_build_status(job_id) every 5s until status=="completed"
 
 ### CLI
 
+**Personal author path** (unscoped admin/editor). Import and save write drafts only. Publish makes the draft the live ontology version and does not materialise (no FalkorDB, Weaviate, or `graph_publish`). Materialise is not a CLI command.
+
+```bash
+weezdom ontology import --file spec.json [--name "Name"]          # create a draft ontology
+weezdom ontology import --file spec.json --ontology-id <id>       # draft on an existing ontology
+weezdom ontology save --ontology-id <id> --file spec.json         # same draft write as import --ontology-id
+weezdom ontology publish --ontology-id <id> [--version-id <id>]   # live document only
+```
+
+`WEEZDOM_API_KEY` and `WEEZDOM_BASE_URL` override the stored login when set. A viewer, Hermes, or workspace reader key gets HTTP 403: this key cannot author; use an unscoped personal admin or editor key.
+
+**Autonomous build path** (suggest spec and server-side AI — not the deep JSON document):
+
 ```bash
 weezdom ontology list
 weezdom ontology suggest "my domain" [--goal "find patterns"]
@@ -253,7 +273,9 @@ weezdom ontology create "Revenue Brain" --spec spec.json
 
 ```
 GET    /ontologies                          → list (quality ≥ 70 only)
-POST   /ontologies                          {name, config}  → {ontology_id, quality, gaps}
+POST   /ontologies                          {name, entity_types, ...}  → create a draft ontology (import without an id)
+POST   /ontologies/{id}/import              structural document → new draft version (import --ontology-id, and save)
+POST   /ontologies/{id}/publish             {version_id?} → live ontology version; does not materialise
 POST   /ontologies/suggest                  {description, goals?}
 GET    /ontologies/{id}/score               → {overall_score, grade, gaps}
 POST   /ontologies/{id}/improve             {improvements}  → {new_version_id, quality}
@@ -261,6 +283,8 @@ POST   /ontologies/build                    {name, description, goals?}  → {jo
 GET    /ontologies/build-status/{job_id}    → {status, ontology_id?}
 DELETE /ontologies/{id}
 ```
+
+`POST /ontologies` and `POST /ontologies/{id}/import` write drafts. `POST /ontologies/{id}/publish` does not enqueue `graph_publish` and does not write FalkorDB or Weaviate. Header is `X-API-Key` for an unscoped personal admin or editor. Do not send `X-Graph-Id` on these calls.
 
 > **MCP users:** if you need to manage ontologies from a non-CLI runtime, use these REST endpoints or the MCP `ws_*` ontology tools above.
 
@@ -274,7 +298,8 @@ DELETE /ontologies/{id}
 | 401 | Invalid or expired token | `wdm_` key in Bearer slot | Move key to `X-API-Key` header |
 | 403 | Tenant is pending approval | Account not approved | Contact workspace admin |
 | 403 | Graph is not an intelligence graph | Writing to subject/reference graph | Use `ws_list_intelligence_graphs` first |
-| 403 | Requires role: admin, editor | User role is viewer | Grant admin/editor role in workspace settings |
+| 403 | Requires role: admin, editor | User role is viewer, or the key is a viewer service account, Hermes, or workspace reader | Author with an unscoped personal admin/editor key |
+| 403 | This key cannot author an ontology | CLI prefix on any ontology import/save/publish 403 | Use `weezdom auth login` with a personal admin/editor key, not a reader key |
 | 422 | (validation error) | Unknown `entity_type` | Call `ws_get_writable_types` first |
 | 409 | (on ontology create) | Name conflict | Use returned `existing_id` |
 
@@ -288,6 +313,7 @@ DELETE /ontologies/{id}
 4. **`ws_get_entity` is subject-graph-only** — for intelligence or reference graph entities, use `ws_get_neighborhood(graph_id, entity_name)` instead.
 5. **Ontology quality gate** — `ws_list_ontologies` hides ontologies scoring below 70. Check with `ws_score_ontology`; raise with `ws_improve_ontology`.
 6. **API key shown once** — the full `wdm_` key is returned only at creation time (`POST /settings/api-keys/personal`). Store it immediately.
+7. **Publish is not materialise** — `weezdom ontology publish` makes the draft the live ontology version. It does not enqueue `graph_publish` and does not write FalkorDB or Weaviate. Reader, Hermes, and workspace reader keys cannot import, save, or publish.
 
 ---
 
