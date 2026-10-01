@@ -63,10 +63,22 @@ weezdom workspace search <query> [-w WORKSPACE_ID] [--limit N]  # Search across 
 
 ### Ontologies
 
+Two authoring paths share the `ontology` group:
+
+- **Deep JSON document** (`import` / `save` / `publish`) — the same `ontology_versions` document Wizard, Chat, MCP, and Import write. Import and save write **drafts**. Publish makes that draft the live ontology version and does **not** materialise (no FalkorDB, Weaviate, or `graph_publish`). Materialise stays a separate server path and is not a command here.
+- **Autonomous build** (`suggest` / `create` / `build` / `score` / `improve`) — template, spec, and server-side AI build. Use this when you do not already have a JSON document.
+
+Authoring needs an **unscoped personal admin or editor** key (`weezdom auth login`, or `WEEZDOM_API_KEY`). A viewer key, a Hermes key, or a workspace reader key cannot author. `WEEZDOM_BASE_URL` overrides the stored `api_url` when set.
+
 ```bash
+weezdom ontology import --file spec.json [--name NAME]              # Create a draft ontology from JSON
+weezdom ontology import --file spec.json --ontology-id <id>         # New draft on an existing ontology
+weezdom ontology save --ontology-id <id> --file spec.json           # Same draft write as import onto an existing id
+weezdom ontology publish --ontology-id <id> [--version-id <id>]     # Live version only; does not materialise
+
 weezdom ontology list                                               # List ontologies with version count and quality score
 weezdom ontology suggest "<description>" [--goal TEXT]...           # Generate a scored ontology template (no DB write)
-weezdom ontology create <name> [--spec FILE|-]                      # Create ontology from structured spec (file or stdin)
+weezdom ontology create <name> [--spec FILE|-]                      # Create ontology from a suggest spec (file or stdin)
 weezdom ontology build <name> "<description>" [--goal TEXT]... [--iterations N]  # Autonomous AI build (~1–4 min, polls until done)
 weezdom ontology build-status <job_id>                              # Check status of a build job (use after timeout/interruption)
 weezdom ontology score <id>                                         # Show quality score and gaps
@@ -84,6 +96,15 @@ Or let the AI do everything in one command:
 ```bash
 weezdom ontology build "Revenue Brain" "Track SaaS pricing" --goal "find patterns" --iterations 3
 ```
+
+Deep JSON import (draft, then publish the document — not the graph):
+```bash
+weezdom ontology import --file spec.json --name "Practice operations"
+weezdom ontology save --ontology-id <ontology-id> --file spec.json
+weezdom ontology publish --ontology-id <ontology-id>
+```
+
+`--format json` prints the API object. Validation errors exit 2. A 403 from a viewer, Hermes, or workspace reader key exits 1 and says an unscoped personal admin or editor key is required.
 
 ### Content Management
 
