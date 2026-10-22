@@ -6,7 +6,7 @@
 #
 anyio==4.13.0
     # via httpx
-build==1.5.0
+build==1.6.1
     # via pip-tools
 certifi==2026.5.20
     # via
