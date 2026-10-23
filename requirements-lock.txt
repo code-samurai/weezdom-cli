@@ -39,7 +39,7 @@ packaging==26.2
     #   build
     #   pytest
     #   wheel
-pip-tools==7.5.3
+pip-tools==7.6.2
     # via weezdom-cli (pyproject.toml)
 pluggy==1.6.0
     # via pytest
