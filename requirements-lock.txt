@@ -24,7 +24,7 @@ httpx==0.28.1
     # via
     #   respx
     #   weezdom-cli (pyproject.toml)
-idna==3.18
+idna==3.20
     # via
     #   anyio
     #   httpx
