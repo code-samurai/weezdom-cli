@@ -41,7 +41,7 @@ packaging==26.2
     #   wheel
 pip-tools==7.5.3
     # via weezdom-cli (pyproject.toml)
-pluggy==1.6.0
+pluggy==1.7.0
     # via pytest
 pygments==2.20.0
     # via
