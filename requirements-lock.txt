@@ -8,7 +8,7 @@ anyio==4.15.1
     # via httpx
 build==1.6.1
     # via pip-tools
-certifi==2026.5.20
+certifi==2026.10.23
     # via
     #   httpcore
     #   httpx
