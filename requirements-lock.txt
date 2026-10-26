@@ -56,7 +56,7 @@ pytest==9.1.1
     #   pytest-asyncio
     #   pytest-mock
     #   weezdom-cli (pyproject.toml)
-pytest-asyncio==1.4.0
+pytest-asyncio==1.4.1
     # via weezdom-cli (pyproject.toml)
 pytest-mock==3.17.0
     # via weezdom-cli (pyproject.toml)
