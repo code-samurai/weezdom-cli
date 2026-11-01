@@ -4,7 +4,7 @@
 #
 #    pip-compile --extra=dev --output-file=requirements-lock.txt pyproject.toml
 #
-anyio==4.15.1
+anyio==4.16.0
     # via httpx
 build==1.6.1
     # via pip-tools
