@@ -1,0 +1,14 @@
+---
+description: Click commands, HTTP client, and ontology authoring in weezdom-cli
+globs: src/weezdom_cli/**/*.py
+alwaysApply: false
+---
+
+# CLI
+
+- Add commands in `src/weezdom_cli/cli.py`. Copy `search` for queries and admin, `ontology_import` for document authoring.
+- Query path: `WeezdomClient` + `run_async`. Headers come from `client.py`: `X-API-Key`, and `X-Graph-Id` when a graph is active. Never `Authorization: Bearer` for a `wdm_` key.
+- Import, save, and publish go through `ontology_authoring.py` only. They write a draft or the live ontology document. They do not materialise a graph and do not send `X-Graph-Id`.
+- Authoring needs an unscoped personal admin or editor key. An authoring 403 uses `AuthoringError` (exit 1) and names that requirement. Validation exits 2. Other HTTP errors stay on `ClickExit`.
+- `--format json` prints JSON on stdout. Mask API keys the way `config_show` does. `api_url` must be `https://`.
+- Do not add entity or fact writes. The CLI does not do that.

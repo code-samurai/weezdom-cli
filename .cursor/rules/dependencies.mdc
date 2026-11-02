@@ -1,0 +1,20 @@
+---
+description: Exact dependency pins and regenerating requirements-lock.txt
+globs: pyproject.toml,requirements-lock.txt
+alwaysApply: false
+---
+
+# Dependencies
+
+CI installs `requirements-lock.txt`, then `pip install -e . --no-deps` (`.github/workflows/test.yml`).
+
+- Pin a dependency you add or change with `==` in `pyproject.toml`.
+- Regenerate the lock. Do not edit it by hand. `pip-tools` is the `dev` extra:
+
+```bash
+pip install -r requirements-lock.txt
+pip-compile --extra=dev --output-file=requirements-lock.txt pyproject.toml
+```
+
+- That `pip-compile` line is the one in the lockfile header. Leave other `>=` floors as they are.
+- If the new lock bumps packages you did not change, stop. Land only the dependency you added or changed. Renovate bumps the rest.
