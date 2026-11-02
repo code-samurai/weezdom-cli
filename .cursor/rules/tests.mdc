@@ -1,0 +1,13 @@
+---
+description: How to test weezdom-cli commands and the HTTP contract
+globs: tests/**/*.py
+alwaysApply: false
+---
+
+# Tests
+
+- Mock HTTP with `respx` and the `mock_config` fixture in `tests/conftest.py`. Do not read or write `~/.weezdom`.
+- Command tests: `click.testing.CliRunner` against `weezdom_cli.cli.main`. Copy `tests/test_commands_query.py`. Authoring: `tests/test_commands_ontology_author.py`.
+- Contract tests in `tests/test_integration_contract.py` assert method, path, `X-API-Key`, `X-Graph-Id`, and body. Update them when a request shape changes.
+- Fake keys only (`wdm_testkey12345678`). Never a real `wdm_` key.
+- `tests/test_live_smoke.py` stays skipped unless `RUN_LIVE=1`. It is the staging check, not the default suite. Pass `WEEZDOM_BASE_URL` for staging; the file default is production.
