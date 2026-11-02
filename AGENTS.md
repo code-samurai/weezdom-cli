@@ -10,6 +10,11 @@
 - **Staging:** one change on staging at a time. Promote it or revert it before anything else merges. Production needs Nik's yes.
 - **Secrets:** never paste a secret value into code, chat, MR/PR text or comments, logs, evidence files or saved tool output. Refer to it by its variable name only.
 - **Self-contained:** these rules must work for a Cursor cloud agent on its own; don't point to bot skills it can't load. Write the actual steps or link a file in this repo.
+- **One place for logic:** each question the product answers (for example "what is the next step") is worked out in one function, and every endpoint and screen calls it. Never compute it twice.
+- **Wording changes:** before changing any user-facing text or docs wording, search the tests for the old phrase (`rg "<old phrase>"`) and update any test that pins it, in the same MR.
+- **Known starting state:** checks and walks never assume what state an environment is in. Read the current state first (for example the current setup step from the API), only check what applies to it, and record the starting state in the report.
+- **Size budgets:** before editing an always-loaded file (rules, agent notes, a shared skill), run the repo's size-budget check, if it has one, and keep the file under budget.
+- **Production images:** a production image or version change goes only through the repo's pinned image list in a reviewed MR. Before any upgrade, read the running version from the live service, write down how you'd roll back, and update every other repo that pins the same service.
 
 ## Project
 
