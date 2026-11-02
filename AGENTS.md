@@ -1,5 +1,16 @@
 # weezdom-cli
 
+## House rules (same in every repo — keep this block identical)
+
+- **Stop rule:** if the same change fails its pipeline or review twice, stop. Post the current state (what failed, why you think it failed) on the MR/PR, and wait for a new brief. Do not try a third fix.
+- **Size limit:** one purpose per MR/PR, about 400 changed lines and 15 files at most (generated files and lockfiles excluded). Bigger work is split into pieces that each pass on their own.
+- **Delete before build:** when replacing a screen, endpoint or flow, delete the old one and its tests first, in the same MR. Never relabel old code as new.
+- **Done means it works:** done means it works in a real browser or against the running service. Green offline tests alone are not done; if the service can't run, the MR is blocked, not done.
+- **Frozen checks:** the test or check list is fixed when the brief goes out. New problems found mid-build go into a follow-up issue unless they block release.
+- **Staging:** one change on staging at a time. Promote it or revert it before anything else merges. Production needs Nik's yes.
+- **Secrets:** never paste a secret value into code, chat, MR/PR text or comments, logs, evidence files or saved tool output. Refer to it by its variable name only.
+- **Self-contained:** these rules must work for a Cursor cloud agent on its own; don't point to bot skills it can't load. Write the actual steps or link a file in this repo.
+
 ## Project
 
 `weezdom-cli` is the terminal client for Weezdom.ai knowledge graphs: search, entities, content, graph admin, and ontology documents. It does not write entities or facts; that stays on the MCP and REST APIs.
@@ -29,7 +40,7 @@ CI runs that pytest on Python 3.10, 3.11, and 3.12. `requires-python` is `>=3.10
 
 `python -m build` runs only in `publish.yml` on `v*` tags. Do not build a wheel to verify a normal change.
 
-`pytest tests/ -v` skips `tests/test_live_smoke.py` unless `RUN_LIVE=1`.
+`pytest tests/ -v` skips `tests/test_live_smoke.py` unless `RUN_LIVE=1` and `WEEZDOM_BASE_URL` is an explicit non-production URL.
 
 ## Coding style
 
@@ -53,18 +64,18 @@ A change is not done until the tests that cover it pass.
 - HTTP shape: `pytest tests/test_integration_contract.py -v`
 - Before a PR, the CI command: `pytest tests/ -v`
 
-Done means it works against the running service. If the change sends or parses API traffic, mocks are not enough. Run the live smoke against the Weezdom **staging** API:
+When the change sends or parses API traffic, run the live smoke against the Weezdom **staging** API:
 
 ```bash
-RUN_LIVE=1 WEEZDOM_BASE_URL=<staging-api-url> WEEZDOM_API_KEY=<wdm-key> pytest tests/test_live_smoke.py -v -s
+RUN_LIVE=1 WEEZDOM_BASE_URL=https://weezdomai-staging.up.railway.app WEEZDOM_API_KEY=<wdm-key> pytest tests/test_live_smoke.py -v -s
 ```
 
-`test_live_smoke.py` defaults `WEEZDOM_BASE_URL` to production (`https://weezdomai-production.up.railway.app`). Set the staging URL. Never print the key or a shell line with the key expanded. If no staging key is available, say so in the PR. Do not point the test at production to make it pass.
+`tests/test_live_smoke.py` skips unless `WEEZDOM_BASE_URL` is set. It does not default to production. The default target is staging (`https://weezdomai-staging.up.railway.app`). A production host is refused. If no staging key is available, say so in the PR.
 
 ## Pull requests
 
 - Branch: `<type>/<short-kebab-summary>` (`fix/search-empty-body`). Renovate keeps `renovate/*`. Cloud agents whose runtime requires a `cursor/` branch still use Conventional Commits.
-- Commits: Conventional Commits, as in `chore(deps): update dependency pytest to v9.2.0`. One purpose per PR.
+- Commits: Conventional Commits, as in `chore(deps): update dependency pytest to v9.2.0`.
 - PR description: what changed, why, and the exact test commands plus results. Say whether staging verification ran.
 - Target `main`. PRs are squash-merged once CI passes on Python 3.10, 3.11, and 3.12.
 
@@ -90,7 +101,7 @@ Exact pins. CI installs `requirements-lock.txt`, then `pip install -e . --no-dep
 
 ## Secrets
 
-Never commit or print secrets, `.env` files, `*.key`, `*.pem`, or API keys. Tests use fake keys (`tests/conftest.py`). Logs and PR text get the masked form only.
+Do not commit `.env`, `*.key`, or `*.pem` files. Tests use fake keys (`tests/conftest.py`).
 
 ## Where work happens
 

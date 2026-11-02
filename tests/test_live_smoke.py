@@ -1,9 +1,11 @@
 """Live smoke tests — exercises each CLI command family against a real API.
 
 Run with:
-    RUN_LIVE=1 WEEZDOM_API_KEY=wdm_... pytest tests/test_live_smoke.py -v -s
-Optional:
-    WEEZDOM_BASE_URL=https://...  (default: production URL)
+    RUN_LIVE=1 WEEZDOM_BASE_URL=https://weezdomai-staging.up.railway.app WEEZDOM_API_KEY=wdm_... pytest tests/test_live_smoke.py -v -s
+
+WEEZDOM_BASE_URL is required. If it is unset, these tests skip and do not
+call a host. They do not default to production. The built-in target is
+staging (``_DEFAULT_SMOKE_BASE_URL``). A production host is refused.
 
 Prerequisites:
     - Tenant account must have at least one active knowledge graph
@@ -13,24 +15,74 @@ Prerequisites:
       (expected behaviour; documented to avoid surprise for devs with local config)
 
 Failure modes:
+    - WEEZDOM_BASE_URL unset, or set to a production host: pytest SKIPPED
+      (no request is sent)
     - Network unreachable or server offline: ClickExit("Connection error: …")
       propagated uncaught → pytest reports FAILED (not SKIPPED)
     - Invalid API key: ClickExit("Not authenticated.…") → pytest FAILED
-    - In both cases the test RAN (it was not skipped) — distinguishable from
-      a skip by the FAILED status in the output.
+    - In both connection and auth cases the test RAN (it was not skipped) —
+      distinguishable from a skip by the FAILED status in the output.
 """
 
 import os
+from urllib.parse import urlparse
+
 import pytest
 from weezdom_cli.client import WeezdomClient
 
-pytestmark = pytest.mark.skipif(
-    not os.getenv("RUN_LIVE"),
-    reason="Live tests skipped. Set RUN_LIVE=1 and WEEZDOM_API_KEY to run.",
-)
+# Smoke URL default. Not sent unless WEEZDOM_BASE_URL is set to it.
+# A missing variable skips; this value is never a production host.
+_DEFAULT_SMOKE_BASE_URL = "https://weezdomai-staging.up.railway.app"
+_PRODUCTION_HOST = "weezdomai-production.up.railway.app"
 
-_BASE_URL = os.getenv("WEEZDOM_BASE_URL", "https://weezdomai-production.up.railway.app")
-_API_KEY  = os.getenv("WEEZDOM_API_KEY", "")
+
+def _is_production_host(url: str) -> bool:
+    text = (url or "").strip().lower()
+    if not text:
+        return False
+    parsed = urlparse(text if "://" in text else "https://" + text)
+    host = (parsed.hostname or "").lower()
+    labels = host.split(".") if host else []
+    return (
+        host == _PRODUCTION_HOST
+        or "production" in labels
+        or "weezdomai-production" in labels
+    )
+
+
+def resolve_live_base_url():
+    """Return ``(base_url, skip_reason)``.
+
+    ``base_url`` is None when the live smoke test must skip. A missing
+    ``WEEZDOM_BASE_URL`` skips and never falls back to production.
+    """
+    if not os.getenv("RUN_LIVE"):
+        return None, (
+            "Live tests skipped. Set RUN_LIVE=1 and WEEZDOM_API_KEY to run."
+        )
+    configured = (os.getenv("WEEZDOM_BASE_URL") or "").strip()
+    if not configured:
+        return None, (
+            "Live tests skipped. WEEZDOM_BASE_URL is not set. "
+            f"Set it explicitly (staging: {_DEFAULT_SMOKE_BASE_URL}). "
+            "This test does not default to production."
+        )
+    if _is_production_host(configured):
+        return None, (
+            "Live tests skipped. WEEZDOM_BASE_URL is a production host. "
+            f"Set it to staging ({_DEFAULT_SMOKE_BASE_URL}). "
+            "This test does not call production."
+        )
+    return configured, None
+
+
+_LIVE_BASE_URL, _LIVE_SKIP_REASON = resolve_live_base_url()
+_API_KEY = os.getenv("WEEZDOM_API_KEY", "")
+
+pytestmark = pytest.mark.skipif(
+    _LIVE_SKIP_REASON is not None,
+    reason=_LIVE_SKIP_REASON or "live smoke runs",
+)
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +90,15 @@ def live_client():
     # WeezdomClient.__init__(api_url, api_key, graph_id=_UNSET, timeout=30)
     # verified: weezdom-cli/src/weezdom_cli/client.py:14
     # graph_id=None → no X-Graph-Id header sent; server uses tenant's default graph
-    return WeezdomClient(api_url=_BASE_URL, api_key=_API_KEY, graph_id=None)
+    if (
+        _LIVE_SKIP_REASON
+        or not _LIVE_BASE_URL
+        or _is_production_host(_LIVE_BASE_URL)
+    ):
+        pytest.skip(
+            _LIVE_SKIP_REASON or "Live tests skipped. Refusing a production host."
+        )
+    return WeezdomClient(api_url=_LIVE_BASE_URL, api_key=_API_KEY, graph_id=None)
 
 
 class TestAuthLive:

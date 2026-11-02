@@ -183,19 +183,13 @@ pytest tests/ -v
 
 ### Live Smoke Tests
 
-To verify response-shape contracts against the real API:
+To verify response-shape contracts, set `WEEZDOM_BASE_URL`. If that variable is unset, the tests skip and do not call a host. They do not default to production. A production host is refused. Staging is `https://weezdomai-staging.up.railway.app`.
 
 ```bash
-RUN_LIVE=1 WEEZDOM_API_KEY=wdm_<your-key> pytest tests/test_live_smoke.py -v -s
+RUN_LIVE=1 WEEZDOM_BASE_URL=https://weezdomai-staging.up.railway.app WEEZDOM_API_KEY=wdm_<your-key> pytest tests/test_live_smoke.py -v -s
 ```
 
-Optional — override the default production URL:
-
-```bash
-WEEZDOM_BASE_URL=https://... RUN_LIVE=1 WEEZDOM_API_KEY=wdm_<your-key> pytest tests/test_live_smoke.py -v -s
-```
-
-Prerequisites: tenant account must have at least one active knowledge graph. All 7 tests skip automatically in standard CI (`RUN_LIVE` is not set).
+Prerequisites: tenant account must have at least one active knowledge graph. The live tests skip in standard CI (`RUN_LIVE` is not set).
 
 ## License
 
