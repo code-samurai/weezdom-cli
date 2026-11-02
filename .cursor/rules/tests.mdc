@@ -11,3 +11,5 @@ alwaysApply: false
 - Contract tests in `tests/test_integration_contract.py` assert method, path, `X-API-Key`, `X-Graph-Id`, and body. Update them when a request shape changes.
 - Fake keys only (`wdm_testkey12345678`).
 - `tests/test_live_smoke.py` stays skipped unless `RUN_LIVE=1` and `WEEZDOM_BASE_URL` is set. It is the staging check, not the default suite. It does not default to production. If `WEEZDOM_BASE_URL` is unset, the live tests skip. A production host is refused. Staging is `https://weezdomai-staging.up.railway.app`.
+- New fakes are copied from a real API sample and keep that sample's call pattern. See **Spec gates (v3, 2 Nov)** in `AGENTS.md`.
+- Show each new test fail on a wrong build and pass on the right one. See **Spec gates (v3, 2 Nov)** in `AGENTS.md`.
